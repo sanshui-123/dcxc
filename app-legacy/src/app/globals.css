@@ -1,0 +1,100 @@
+@import "tailwindcss";
+
+@theme {
+  /* Shadcn-style Design Tokens */
+  --color-background: 0 0% 100%;
+  --color-foreground: 240 10% 3.9%;
+  --color-card: 0 0% 100%;
+  --color-card-foreground: 240 10% 3.9%;
+  --color-popover: 0 0% 100%;
+  --color-popover-foreground: 240 10% 3.9%;
+  --color-primary: 240 5.9% 10%;
+  --color-primary-foreground: 0 0% 98%;
+  --color-secondary: 240 4.8% 95.9%;
+  --color-secondary-foreground: 240 5.9% 10%;
+  --color-muted: 240 4.8% 95.9%;
+  --color-muted-foreground: 240 3.8% 46.1%;
+  --color-accent: 240 4.8% 95.9%;
+  --color-accent-foreground: 240 5.9% 10%;
+  --color-destructive: 0 84.2% 60.2%;
+  --color-destructive-foreground: 0 0% 98%;
+  --color-border: 240 5.9% 90%;
+  --color-input: 240 5.9% 90%;
+  --color-ring: 240 5.9% 10%;
+
+  --radius: 0.5rem;
+}
+
+:root {
+  --background: hsl(var(--color-background));
+  --foreground: hsl(var(--color-foreground));
+  --card: hsl(var(--color-card));
+  --card-foreground: hsl(var(--color-card-foreground));
+  --popover: hsl(var(--color-popover));
+  --popover-foreground: hsl(var(--color-popover-foreground));
+  --primary: hsl(var(--color-primary));
+  --primary-foreground: hsl(var(--color-primary-foreground));
+  --secondary: hsl(var(--color-secondary));
+  --secondary-foreground: hsl(var(--color-secondary-foreground));
+  --muted: hsl(var(--color-muted));
+  --muted-foreground: hsl(var(--color-muted-foreground));
+  --accent: hsl(var(--color-accent));
+  --accent-foreground: hsl(var(--color-accent-foreground));
+  --destructive: hsl(var(--color-destructive));
+  --destructive-foreground: hsl(var(--color-destructive-foreground));
+  --border: hsl(var(--color-border));
+  --input: hsl(var(--color-input));
+  --ring: hsl(var(--color-ring));
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/* Card Component */
+.card {
+  rounded-radius: var(--radius);
+  border: 1px solid var(--border);
+  background-color: var(--card);
+  color: var(--card-foreground);
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1);
+}
+
+/* Button Component */
+.btn-primary {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border-radius: calc(var(--radius) - 2px);
+  padding: 0.5rem 1rem;
+  font-weight: 500;
+  transition: opacity 0.2s;
+}
+
+.btn-primary:hover {
+  opacity: 0.9;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--color-border));
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--color-muted-foreground));
+}

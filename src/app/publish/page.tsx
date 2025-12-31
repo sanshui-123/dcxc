@@ -54,6 +54,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { readJson } from "@/lib/http";
 
 type DraftItem = {
   id: string;
@@ -117,6 +118,17 @@ function loadDrafts(): DraftItem[] {
 
 function saveDrafts(list: DraftItem[]) {
   localStorage.setItem(DRAFTS_KEY, JSON.stringify(list));
+}
+
+async function readApiJson<T>(res: Response, label: string) {
+  const parsed = await readJson<T>(res);
+  if (!parsed.ok) {
+    return {
+      ok: false as const,
+      error: `${label}返回非 JSON 响应（${res.status}）。`,
+    };
+  }
+  return { ok: true as const, data: parsed.data };
 }
 
 function loadWechatAccounts(): WechatAccount[] {
@@ -207,11 +219,17 @@ export default function PublishPage() {
     setSyncError(null);
     try {
       const res = await fetch("/api/wechat-accounts", { method: "POST" });
-      const data = (await res.json()) as {
+      const parsed = await readApiJson<{
         ok: boolean;
         data?: { data?: { accounts?: WechatAccount[] } };
         error?: string;
-      };
+      }>(res, "同步接口");
+      if (!parsed.ok) {
+        setSyncError(parsed.error);
+        return;
+      }
+
+      const data = parsed.data;
 
       if (!res.ok || !data.ok) {
         setSyncError(data.error || "同步失败，请稍后再试。");
@@ -277,11 +295,20 @@ export default function PublishPage() {
         }),
       });
 
-      const data = (await res.json()) as {
+      const parsed = await readApiJson<{
         ok: boolean;
         data?: { data?: { publicationId?: string } };
         error?: string;
-      };
+      }>(res, "发布接口");
+      if (!parsed.ok) {
+        updateItem(item.id, {
+          status: "failed",
+          lastError: parsed.error,
+        });
+        return;
+      }
+
+      const data = parsed.data;
 
       if (!res.ok || !data.ok) {
         updateItem(item.id, {

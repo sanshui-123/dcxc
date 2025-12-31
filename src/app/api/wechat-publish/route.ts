@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readJson } from "@/lib/http";
 
 const API_URL = "https://wx.limyai.com/api/openapi/wechat-publish";
 
@@ -55,10 +56,21 @@ export async function POST(req: Request) {
       cache: "no-store",
     });
 
-    const data = await res.json();
+    const parsed = await readJson(res);
+    if (!parsed.ok) {
+      console.warn("wechat-publish 返回非 JSON", {
+        status: res.status,
+        snippet: parsed.text.slice(0, 120),
+      });
+      return NextResponse.json(
+        { ok: false, error: "上游返回非 JSON 响应。" },
+        { status: 502 }
+      );
+    }
+
+    const data = parsed.data as { success?: boolean; error?: string; code?: string };
     if (!res.ok || !data?.success) {
-      const errorMessage =
-        data?.error || `上游请求失败: ${res.status}`;
+      const errorMessage = data?.error || `上游请求失败: ${res.status}`;
       return NextResponse.json(
         { ok: false, error: errorMessage, code: data?.code },
         { status: 502 }

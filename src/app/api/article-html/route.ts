@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { DajialaArticleHtmlResponse } from "@/lib/dajiala";
+import { readJson } from "@/lib/http";
 
 const API_URL = "https://www.dajiala.com/fbmain/monitor/v3/article_html";
 
@@ -42,8 +43,19 @@ export async function POST(req: Request) {
       );
     }
 
-    const data = (await res.json()) as DajialaArticleHtmlResponse;
-    return NextResponse.json({ ok: true, data });
+    const parsed = await readJson<DajialaArticleHtmlResponse>(res);
+    if (!parsed.ok) {
+      console.warn("article_html 返回非 JSON", {
+        status: res.status,
+        snippet: parsed.text.slice(0, 120),
+      });
+      return NextResponse.json(
+        { ok: false, error: "上游返回非 JSON 响应。" },
+        { status: 502 }
+      );
+    }
+
+    return NextResponse.json({ ok: true, data: parsed.data });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "无法连接上游接口。";

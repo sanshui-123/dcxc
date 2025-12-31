@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readJson } from "@/lib/http";
 
 const DEFAULT_MODEL = "glm-4.7";
 const DEFAULT_BASE_URL =
@@ -146,9 +147,21 @@ export async function POST(req: Request) {
       );
     }
 
-    const data = (await res.json()) as {
+    const parsed = await readJson<{
       choices?: Array<{ message?: { content?: string } }>;
-    };
+    }>(res);
+    if (!parsed.ok) {
+      console.warn("GLM 返回非 JSON", {
+        status: res.status,
+        snippet: parsed.text.slice(0, 120),
+      });
+      return NextResponse.json(
+        { ok: false, error: "改写接口返回非 JSON 响应。" },
+        { status: 502 }
+      );
+    }
+
+    const data = parsed.data;
 
     const content = data.choices?.[0]?.message?.content?.trim() || "";
     if (!content) {
@@ -181,13 +194,20 @@ export async function POST(req: Request) {
       });
 
       if (expandRes.ok) {
-        const expandData = (await expandRes.json()) as {
+        const expandParsed = await readJson<{
           choices?: Array<{ message?: { content?: string } }>;
-        };
-        const expanded =
-          expandData.choices?.[0]?.message?.content?.trim() || "";
-        if (expanded) {
-          draftMarkdown = expanded;
+        }>(expandRes);
+        if (expandParsed.ok) {
+          const expanded =
+            expandParsed.data.choices?.[0]?.message?.content?.trim() || "";
+          if (expanded) {
+            draftMarkdown = expanded;
+          }
+        } else {
+          console.warn("GLM 扩写返回非 JSON", {
+            status: expandRes.status,
+            snippet: expandParsed.text.slice(0, 120),
+          });
         }
       }
     }

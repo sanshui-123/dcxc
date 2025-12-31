@@ -18,6 +18,7 @@ import type {
   DajialaArticleHtmlResponse,
   DajialaResponse,
 } from "@/lib/dajiala";
+import { readJson } from "@/lib/http";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -110,6 +111,17 @@ function saveDrafts(list: DraftItem[]) {
 function getFirstImage(markdown: string) {
   const match = markdown.match(/!\[[^\]]*]\(([^)]+)\)/);
   return match?.[1] || "";
+}
+
+async function readApiJson<T>(res: Response, label: string) {
+  const parsed = await readJson<T>(res);
+  if (!parsed.ok) {
+    return {
+      ok: false as const,
+      error: `${label}返回非 JSON 响应（${res.status}）。`,
+    };
+  }
+  return { ok: true as const, data: parsed.data };
 }
 
 export default function CreatePage() {
@@ -209,7 +221,13 @@ export default function CreatePage() {
         }),
       });
 
-      const data = (await res.json()) as AnalysisApiResponse;
+      const parsed = await readApiJson<AnalysisApiResponse>(res, "抓取接口");
+      if (!parsed.ok) {
+        setError(parsed.error);
+        return;
+      }
+
+      const data = parsed.data;
       if (!res.ok || !data.ok) {
         setError(!data.ok ? data.error : "抓取失败，请稍后再试。");
         return;
@@ -246,7 +264,16 @@ export default function CreatePage() {
         body: JSON.stringify({ url: article.url }),
       });
 
-      const data = (await res.json()) as ArticleHtmlApiResponse;
+      const parsed = await readApiJson<ArticleHtmlApiResponse>(
+        res,
+        "正文接口"
+      );
+      if (!parsed.ok) {
+        setDetailError(parsed.error);
+        return null;
+      }
+
+      const data = parsed.data;
       if (!res.ok || !data.ok) {
         setDetailError(!data.ok ? data.error : "获取正文失败。");
         return null;
@@ -295,7 +322,13 @@ export default function CreatePage() {
         }),
       });
 
-      const data = (await res.json()) as RewriteApiResponse;
+      const parsed = await readApiJson<RewriteApiResponse>(res, "改写接口");
+      if (!parsed.ok) {
+        setError(parsed.error);
+        return;
+      }
+
+      const data = parsed.data;
       if (!res.ok || !data.ok) {
         setError(!data.ok ? data.error : "改写失败，请稍后再试。");
         return;

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readJson } from "@/lib/http";
 
 const API_URL = "https://wx.limyai.com/api/openapi/wechat-accounts";
 
@@ -29,8 +30,19 @@ export async function POST() {
       );
     }
 
-    const data = await res.json();
-    return NextResponse.json({ ok: true, data });
+    const parsed = await readJson(res);
+    if (!parsed.ok) {
+      console.warn("wechat-accounts 返回非 JSON", {
+        status: res.status,
+        snippet: parsed.text.slice(0, 120),
+      });
+      return NextResponse.json(
+        { ok: false, error: "上游返回非 JSON 响应。" },
+        { status: 502 }
+      );
+    }
+
+    return NextResponse.json({ ok: true, data: parsed.data });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "无法连接上游接口。";

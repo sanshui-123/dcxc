@@ -2,6 +2,21 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
+### Environment Variables
+
+Create `.env.local` based on `.env.example` and fill in the API key:
+
+```bash
+cp .env.example .env.local
+```
+
+```
+DAJIALA_API_KEY=your_api_key_here
+GLM_API_KEY=your_glm_key_here
+GLM_API_BASE=https://open.bigmodel.cn/api/paas/v4/chat/completions
+GLM_MODEL=glm-4.7
+```
+
 First, run the development server:
 
 ```bash

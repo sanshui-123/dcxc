@@ -62,6 +62,7 @@ type DraftItem = {
   content: string;
   status: "draft" | "ready" | "publishing" | "published" | "failed";
   updatedAt: string;
+  topic?: string;
   sourceTitle?: string;
   sourceUrl?: string;
   lastError?: string;
@@ -168,6 +169,23 @@ function stripMarkdown(markdown: string) {
     .trim();
 }
 
+function stripLeadingTitle(markdown: string) {
+  const lines = markdown.split("\n");
+  let index = 0;
+  while (index < lines.length && lines[index].trim() === "") {
+    index += 1;
+  }
+
+  if (index < lines.length && /^#\s+/.test(lines[index].trim())) {
+    lines.splice(index, 1);
+    if (index < lines.length && lines[index].trim() === "") {
+      lines.splice(index, 1);
+    }
+  }
+
+  return lines.join("\n");
+}
+
 function extractSummary(markdown: string) {
   const text = stripMarkdown(markdown);
   return text.slice(0, 120);
@@ -193,10 +211,13 @@ export default function PublishPage() {
   const [syncLoading, setSyncLoading] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [selectedAppid, setSelectedAppid] = useState("");
-  const [publishLoadingId, setPublishLoadingId] = useState<string | null>(null);
+  const [publishingIds, setPublishingIds] = useState<Record<string, boolean>>(
+    {}
+  );
   const [publishError, setPublishError] = useState<string | null>(null);
   const [failedItem, setFailedItem] = useState<DraftItem | null>(null);
   const [showErrorSheet, setShowErrorSheet] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   useEffect(() => {
     setItems(loadDrafts());
@@ -204,6 +225,12 @@ export default function PublishPage() {
     setAccounts(loadedAccounts);
     setSelectedAppid(localStorage.getItem(DEFAULT_APPID_KEY) || "");
   }, []);
+
+  useEffect(() => {
+    setSelectedIds((prev) =>
+      prev.filter((id) => items.some((item) => item.id === id))
+    );
+  }, [items]);
 
   const handleRefresh = () => {
     setItems(loadDrafts());
@@ -213,6 +240,33 @@ export default function PublishPage() {
     setSelectedAppid(appid);
     localStorage.setItem(DEFAULT_APPID_KEY, appid);
   };
+
+  const selectedItems = useMemo(
+    () => items.filter((item) => selectedIds.includes(item.id)),
+    [items, selectedIds]
+  );
+
+  const allSelected = items.length > 0 && selectedIds.length === items.length;
+
+  const toggleSelected = (id: string) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const toggleSelectAll = () => {
+    if (allSelected) {
+      setSelectedIds([]);
+      return;
+    }
+    setSelectedIds(items.map((item) => item.id));
+  };
+
+  const clearSelection = () => {
+    setSelectedIds([]);
+  };
+
+  const isPublishing = Object.keys(publishingIds).length > 0;
 
   const handleSyncWechat = async () => {
     setSyncLoading(true);
@@ -269,16 +323,17 @@ export default function PublishPage() {
       return;
     }
 
-    setPublishLoadingId(item.id);
+    setPublishingIds((prev) => ({ ...prev, [item.id]: true }));
     setPublishError(null);
     updateItem(item.id, { status: "publishing", lastError: undefined });
 
-    const coverImage = extractImages(item.content)[0];
-    const summary = extractSummary(item.content);
+    const normalizedContent = stripLeadingTitle(item.content);
+    const coverImage = extractImages(normalizedContent)[0];
+    const summary = extractSummary(normalizedContent);
     const payloadContent =
       articleType === "newspic"
-        ? buildNewspicContent(item.content)
-        : item.content;
+        ? buildNewspicContent(normalizedContent)
+        : normalizedContent;
 
     try {
       const res = await fetch("/api/wechat-publish", {
@@ -327,14 +382,34 @@ export default function PublishPage() {
         error instanceof Error ? error.message : "发布失败，请稍后再试。";
       updateItem(item.id, { status: "failed", lastError: message });
     } finally {
-      setPublishLoadingId(null);
+      setPublishingIds((prev) => {
+        const next = { ...prev };
+        delete next[item.id];
+        return next;
+      });
     }
+  };
+
+  const handleBatchPublish = async (articleType: "news" | "newspic") => {
+    if (selectedItems.length === 0 || isPublishing) return;
+    if (!selectedAppid) {
+      setPublishError("请先同步并选择公众号账号。");
+      return;
+    }
+
+    setPublishError(null);
+    for (const item of selectedItems) {
+      await handlePublish(item, articleType);
+    }
+
+    clearSelection();
   };
 
   const rows = useMemo(() => {
     return items.map((item) => ({
       id: item.id,
       title: item.title,
+      topic: item.topic,
       status: item.status,
       time: item.status === "ready" ? "待定时" : "未设置",
       updated: formatDateTime(item.updatedAt),
@@ -514,14 +589,56 @@ export default function PublishPage() {
       ) : null}
 
       <Card className="border-border/60 bg-white/70">
-        <CardHeader>
+        <CardHeader className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <CardTitle className="text-base font-semibold">文章列表</CardTitle>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted-foreground">
+              已选 {selectedIds.length} 篇
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 rounded-full"
+              onClick={clearSelection}
+              disabled={selectedIds.length === 0 || isPublishing}
+            >
+              清空选择
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-full"
+              onClick={() => handleBatchPublish("news")}
+              disabled={selectedIds.length === 0 || isPublishing}
+            >
+              批量发布公众号
+            </Button>
+            <Button
+              size="sm"
+              className="h-8 rounded-full"
+              onClick={() => handleBatchPublish("newspic")}
+              disabled={selectedIds.length === 0 || isPublishing}
+            >
+              批量发布小绿书
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-10">
+                  <input
+                    type="checkbox"
+                    aria-label="全选"
+                    checked={allSelected}
+                    onChange={toggleSelectAll}
+                    disabled={items.length === 0 || isPublishing}
+                    className="h-4 w-4 accent-foreground"
+                  />
+                </TableHead>
                 <TableHead>标题</TableHead>
+                <TableHead>主题</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead>定时</TableHead>
                 <TableHead>更新时间</TableHead>
@@ -532,7 +649,7 @@ export default function PublishPage() {
               {rows.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={5}
+                    colSpan={7}
                     className="text-center text-sm text-muted-foreground"
                   >
                     暂无保存内容，请先在“内容创作”保存草稿。
@@ -541,9 +658,21 @@ export default function PublishPage() {
               ) : (
                 rows.map((item) => {
                   const status = statusMap[item.status];
-                  const loading = publishLoadingId === item.id;
+                  const loading = Boolean(publishingIds[item.id]);
+                  const sourceItem = items.find((row) => row.id === item.id);
+                  const isSelected = selectedIds.includes(item.id);
                   return (
                     <TableRow key={item.id}>
+                      <TableCell>
+                        <input
+                          type="checkbox"
+                          aria-label="选择文章"
+                          checked={isSelected}
+                          onChange={() => toggleSelected(item.id)}
+                          disabled={isPublishing}
+                          className="h-4 w-4 accent-foreground"
+                        />
+                      </TableCell>
                       <TableCell className="font-medium">
                         <div>{item.title}</div>
                         {item.lastError ? (
@@ -551,6 +680,11 @@ export default function PublishPage() {
                             {item.lastError}
                           </div>
                         ) : null}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="rounded-full">
+                          {item.topic || "未分类"}
+                        </Badge>
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
@@ -570,7 +704,7 @@ export default function PublishPage() {
                               size="sm"
                               className="h-8 text-rose-600 hover:text-rose-700 hover:bg-rose-50"
                               onClick={() =>
-                                handleShowError(items.find((row) => row.id === item.id)!)
+                                sourceItem ? handleShowError(sourceItem) : null
                               }
                             >
                               <AlertCircle className="mr-1 h-3 w-3" />
@@ -590,7 +724,9 @@ export default function PublishPage() {
                               <DropdownMenuItem
                                 disabled={loading}
                                 onClick={() =>
-                                  handlePublish(items.find((row) => row.id === item.id)!, "news")
+                                  sourceItem
+                                    ? handlePublish(sourceItem, "news")
+                                    : null
                                 }
                               >
                                 <Send className="mr-2 h-4 w-4" />
@@ -599,7 +735,9 @@ export default function PublishPage() {
                               <DropdownMenuItem
                                 disabled={loading}
                                 onClick={() =>
-                                  handlePublish(items.find((row) => row.id === item.id)!, "newspic")
+                                  sourceItem
+                                    ? handlePublish(sourceItem, "newspic")
+                                    : null
                                 }
                               >
                                 <Sparkles className="mr-2 h-4 w-4" />

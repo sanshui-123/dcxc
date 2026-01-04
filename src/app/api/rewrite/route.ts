@@ -22,6 +22,15 @@ function getTextLength(markdown: string) {
     .length;
 }
 
+function normalizeTopic(value?: string) {
+  if (!value) return "";
+  return value
+    .replace(/[，。；;：:,.!?！]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 24);
+}
+
 function pickImages(coverUrl?: string) {
   const pool = [...IMAGE_POOL];
   for (let i = pool.length - 1; i > 0; i -= 1) {
@@ -75,14 +84,33 @@ function injectImages(markdown: string, coverUrl?: string) {
   return output;
 }
 
+type ParsedRewrite = {
+  title?: string;
+  markdown?: string;
+  topic?: string;
+  theme?: string;
+  subject?: string;
+  "主题"?: string;
+};
+
 function tryParseJSON(content: string) {
   const trimmed = content.trim();
   if (!trimmed.startsWith("{")) return null;
   try {
-    return JSON.parse(trimmed) as { title?: string; markdown?: string };
+    return JSON.parse(trimmed) as ParsedRewrite;
   } catch {
     return null;
   }
+}
+
+function resolveTopic(parsed: ParsedRewrite | null, fallback: string) {
+  const raw =
+    parsed?.topic ||
+    parsed?.theme ||
+    parsed?.subject ||
+    parsed?.["主题"] ||
+    "";
+  return normalizeTopic(raw) || normalizeTopic(fallback) || "未分类";
 }
 
 export async function POST(req: Request) {
@@ -121,7 +149,7 @@ export async function POST(req: Request) {
   const systemPrompt =
     "你是微信公众号资深编辑，擅长把原文改写成结构清晰、可直接发布的公众号文章。";
 
-  const userPrompt = `请根据提供的原文内容改写为新的公众号文章。\n要求：\n1) 输出 JSON，包含 title 和 markdown 两个字段。\n2) markdown 使用公众号常见排版模板：\n   - # 标题\n   - > 导语（2-3 句）\n   - ## 小标题（3-5 段）\n   - 要点清单（项目符号）\n   - 适用人群/注意事项\n   - 小结收束\n3) 在 markdown 中安排 {{IMAGE_1}} 与 {{IMAGE_2}} 两个图片占位符，用于插图位置。\n4) 正文不少于 1000 字（不包含空格/标点）。\n5) 文章语言为简体中文，逻辑清晰、段落分明、可读性强。\n6) 不要堆砌营销话术，不要添加未给出的事实，保持与原文一致的核心信息。\n7) 标题需改写为更适合公众号的表达，但不夸大。\n\n原文标题：${title || "无"}\n原文链接：${sourceUrl || "无"}\n原文 HTML：\n${html}\n`;
+  const userPrompt = `请根据提供的原文内容改写为新的公众号文章。\n要求：\n1) 输出 JSON，包含 title、topic、markdown 三个字段。\n2) topic 用 6-12 字概括文章主题。\n3) markdown 正文不需要再写 # 标题，使用常见排版模板：\n   - > 导语（2-3 句）\n   - ## 小标题（3-5 段）\n   - 要点清单（项目符号）\n   - 适用人群/注意事项\n   - 小结收束\n4) 在 markdown 中安排 {{IMAGE_1}} 与 {{IMAGE_2}} 两个图片占位符，用于插图位置。\n5) 正文不少于 1000 字（不包含空格/标点）。\n6) 文章语言为简体中文，逻辑清晰、段落分明、可读性强。\n7) 不要堆砌营销话术，不要添加未给出的事实，保持与原文一致的核心信息。\n8) 标题需改写为更适合公众号的表达，但不夸大。\n\n原文标题：${title || "无"}\n原文链接：${sourceUrl || "无"}\n原文 HTML：\n${html}\n`;
 
   try {
     const res = await fetch(baseUrl, {
@@ -171,12 +199,13 @@ export async function POST(req: Request) {
       );
     }
 
-    const parsed = tryParseJSON(content);
-    const draftTitle = parsed?.title?.trim() || title || "未命名文章";
-    let draftMarkdown = (parsed?.markdown?.trim() || content).trim();
+    const parsedContent = tryParseJSON(content);
+    const draftTitle = parsedContent?.title?.trim() || title || "未命名文章";
+    const draftTopic = resolveTopic(parsedContent, draftTitle);
+    let draftMarkdown = (parsedContent?.markdown?.trim() || content).trim();
 
     if (getTextLength(draftMarkdown) < 1000) {
-      const expandPrompt = `请将下面的公众号文章在不新增事实的前提下扩写到 1000 字以上，保持原有结构和语气，输出 Markdown 正文即可，不要输出 JSON：\n\n${draftMarkdown}\n`;
+      const expandPrompt = `请将下面的公众号文章在不新增事实的前提下扩写到 1000 字以上，保持原有结构和语气，输出 Markdown 正文即可（不需要 # 标题），不要输出 JSON：\n\n${draftMarkdown}\n`;
       const expandRes = await fetch(baseUrl, {
         method: "POST",
         headers: {
@@ -216,7 +245,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       ok: true,
-      data: { title: draftTitle, content: outputMarkdown },
+      data: { title: draftTitle, content: outputMarkdown, topic: draftTopic },
     });
   } catch (error) {
     const message =

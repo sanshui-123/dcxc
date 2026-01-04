@@ -43,7 +43,7 @@ type ArticleHtmlApiResponse =
   | { ok: false; error: string };
 
 type RewriteApiResponse =
-  | { ok: true; data: { title: string; content: string } }
+  | { ok: true; data: { title: string; content: string; topic?: string } }
   | { ok: false; error: string };
 
 type DraftItem = {
@@ -52,8 +52,17 @@ type DraftItem = {
   content: string;
   status: "draft" | "ready";
   updatedAt: string;
+  topic?: string;
   sourceTitle?: string;
   sourceUrl?: string;
+  lastError?: string;
+  publicationId?: string;
+};
+
+type RewriteStatus = {
+  status: "idle" | "loading" | "success" | "error";
+  error?: string;
+  topic?: string;
 };
 
 const STORAGE_KEY = "create-articles-cache-v1";
@@ -76,6 +85,36 @@ function getEngagement(article: DajialaArticle) {
 
 function stripScripts(html: string) {
   return html.replace(/<script[\s\S]*?<\/script>/gi, "");
+}
+
+function normalizeTopic(value?: string) {
+  if (!value) return "";
+  return value
+    .replace(/[，。；;：:,.!?！]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 24);
+}
+
+function resolveTopic({
+  rewriteTopic,
+  article,
+  keyword,
+  fallbackTitle,
+}: {
+  rewriteTopic?: string;
+  article?: DajialaArticle | null;
+  keyword?: string;
+  fallbackTitle?: string;
+}) {
+  const manual = rewriteTopic?.trim();
+  if (manual) return manual.slice(0, 24);
+  return (
+    normalizeTopic(article?.classify) ||
+    normalizeTopic(keyword) ||
+    normalizeTopic(fallbackTitle) ||
+    "未分类"
+  );
 }
 
 function dedupeArticles(items: DajialaArticle[]) {
@@ -106,6 +145,32 @@ function loadDrafts(): DraftItem[] {
 
 function saveDrafts(list: DraftItem[]) {
   localStorage.setItem(DRAFTS_KEY, JSON.stringify(list));
+}
+
+function upsertDraft(item: DraftItem) {
+  const list = loadDrafts();
+  const sourceUrl = item.sourceUrl?.trim();
+  const clearedItem = {
+    ...item,
+    lastError: undefined,
+    publicationId: undefined,
+  };
+  if (!sourceUrl) {
+    saveDrafts([clearedItem, ...list]);
+    return clearedItem.id;
+  }
+
+  const index = list.findIndex((draft) => draft.sourceUrl === sourceUrl);
+  if (index === -1) {
+    saveDrafts([clearedItem, ...list]);
+    return clearedItem.id;
+  }
+
+  const existing = list[index];
+  const updated = { ...existing, ...clearedItem, id: existing.id };
+  const next = [updated, ...list.filter((_, idx) => idx !== index)];
+  saveDrafts(next);
+  return existing.id;
 }
 
 function getFirstImage(markdown: string) {
@@ -142,10 +207,17 @@ export default function CreatePage() {
 
   const [title, setTitle] = useState("");
   const [markdown, setMarkdown] = useState("");
+  const [topic, setTopic] = useState("");
   const [rewriteLoading, setRewriteLoading] = useState(false);
   const [rewriteTarget, setRewriteTarget] = useState<string | null>(null);
   const [draftId, setDraftId] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [batchRewriting, setBatchRewriting] = useState(false);
+  const [batchMessage, setBatchMessage] = useState<string | null>(null);
+  const [selectedUrls, setSelectedUrls] = useState<string[]>([]);
+  const [rewriteStatus, setRewriteStatus] = useState<
+    Record<string, RewriteStatus>
+  >({});
 
   useEffect(() => {
     const cached = localStorage.getItem(STORAGE_KEY);
@@ -190,12 +262,55 @@ export default function CreatePage() {
     return () => window.clearTimeout(timer);
   }, [saveMessage]);
 
+  useEffect(() => {
+    if (!batchMessage) return;
+    const timer = window.setTimeout(() => setBatchMessage(null), 2500);
+    return () => window.clearTimeout(timer);
+  }, [batchMessage]);
+
+  useEffect(() => {
+    setSelectedUrls([]);
+    setRewriteStatus({});
+  }, [articles]);
+
   const activeHtml = useMemo(() => {
     if (!activeDetail?.html) return "";
     return stripScripts(activeDetail.html);
   }, [activeDetail]);
 
   const coverImage = useMemo(() => getFirstImage(markdown), [markdown]);
+
+  const requestArticleHtml = async (article: DajialaArticle) => {
+    const cached = articleCache[article.url];
+    if (cached) return cached;
+
+    const res = await fetch("/api/article-html", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: article.url }),
+    });
+
+    const parsed = await readApiJson<ArticleHtmlApiResponse>(res, "正文接口");
+    if (!parsed.ok) {
+      throw new Error(parsed.error);
+    }
+
+    const data = parsed.data;
+    if (!res.ok || !data.ok) {
+      throw new Error(!data.ok ? data.error : "获取正文失败。");
+    }
+
+    if (!data.data?.data) {
+      throw new Error("未获取到正文内容。");
+    }
+
+    const detail = data.data.data;
+    setArticleCache((prev) => ({
+      ...prev,
+      [article.url]: detail,
+    }));
+    return detail;
+  };
 
   const fetchArticles = async () => {
     const trimmed = keyword.trim();
@@ -258,38 +373,9 @@ export default function CreatePage() {
     setActiveDetail(null);
 
     try {
-      const res = await fetch("/api/article-html", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: article.url }),
-      });
-
-      const parsed = await readApiJson<ArticleHtmlApiResponse>(
-        res,
-        "正文接口"
-      );
-      if (!parsed.ok) {
-        setDetailError(parsed.error);
-        return null;
-      }
-
-      const data = parsed.data;
-      if (!res.ok || !data.ok) {
-        setDetailError(!data.ok ? data.error : "获取正文失败。");
-        return null;
-      }
-
-      if (!data.data?.data) {
-        setDetailError("未获取到正文内容。\n");
-        return null;
-      }
-
-      setActiveDetail(data.data.data);
-      setArticleCache((prev) => ({
-        ...prev,
-        [article.url]: data.data.data,
-      }));
-      return data.data.data;
+      const detail = await requestArticleHtml(article);
+      setActiveDetail(detail);
+      return detail;
     } catch (err) {
       const message = err instanceof Error ? err.message : "获取正文失败";
       setDetailError(message);
@@ -299,47 +385,93 @@ export default function CreatePage() {
     }
   };
 
+  const rewriteArticle = async (article: DajialaArticle) => {
+    const detail = await requestArticleHtml(article);
+    const sourceUrl = detail.article_url || article.url;
+    const res = await fetch("/api/rewrite", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: detail.title || article.title,
+        html: detail.html,
+        coverUrl: detail.cover_url,
+        sourceUrl,
+      }),
+    });
+
+    const parsed = await readApiJson<RewriteApiResponse>(res, "改写接口");
+    if (!parsed.ok) {
+      throw new Error(parsed.error);
+    }
+
+    const data = parsed.data;
+    if (!res.ok || !data.ok) {
+      throw new Error(!data.ok ? data.error : "改写失败，请稍后再试。");
+    }
+
+    const draftTitle = data.data.title || detail.title || article.title;
+    const draftContent = data.data.content || "";
+    if (!draftContent.trim()) {
+      throw new Error("未获取到改写内容。");
+    }
+
+    const draftTopic = resolveTopic({
+      rewriteTopic: data.data.topic,
+      article,
+      keyword,
+      fallbackTitle: draftTitle,
+    });
+
+    return {
+      detail,
+      title: draftTitle,
+      content: draftContent,
+      topic: draftTopic,
+      sourceUrl,
+    };
+  };
+
   const handleRewrite = async (article: DajialaArticle) => {
     setRewriteLoading(true);
     setRewriteTarget(article.url);
     setError(null);
+    setRewriteStatus((prev) => ({
+      ...prev,
+      [article.url]: { status: "loading" },
+    }));
 
     try {
-      const detail = (await loadArticleHtml(article)) ?? activeDetail;
-      if (!detail) {
-        setError("无法获取正文，改写失败。");
-        return;
-      }
+      await loadArticleHtml(article);
+      const result = await rewriteArticle(article);
 
-      const res = await fetch("/api/rewrite", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: detail.title || article.title,
-          html: detail.html,
-          coverUrl: detail.cover_url,
-          sourceUrl: detail.article_url || article.url,
-        }),
+      setTitle(result.title);
+      setMarkdown(result.content);
+      setTopic(result.topic);
+
+      const now = new Date().toISOString();
+      const id = upsertDraft({
+        id: crypto.randomUUID(),
+        title: result.title,
+        content: result.content,
+        status: "ready",
+        updatedAt: now,
+        topic: result.topic,
+        sourceTitle: article.title,
+        sourceUrl: result.sourceUrl,
       });
-
-      const parsed = await readApiJson<RewriteApiResponse>(res, "改写接口");
-      if (!parsed.ok) {
-        setError(parsed.error);
-        return;
-      }
-
-      const data = parsed.data;
-      if (!res.ok || !data.ok) {
-        setError(!data.ok ? data.error : "改写失败，请稍后再试。");
-        return;
-      }
-
-      setTitle(data.data.title || detail.title || article.title);
-      setMarkdown(data.data.content || "");
-      setDraftId(null);
+      setDraftId(id);
+      setSaveMessage("改写完成，已同步到发布管理");
+      setRewriteStatus((prev) => ({
+        ...prev,
+        [article.url]: { status: "success", topic: result.topic },
+      }));
     } catch (err) {
       const message = err instanceof Error ? err.message : "改写失败";
       setError(message);
+      setRewriteStatus((prev) => ({
+        ...prev,
+        [article.url]: { status: "error", error: message },
+      }));
     } finally {
       setRewriteLoading(false);
       setRewriteTarget(null);
@@ -349,33 +481,123 @@ export default function CreatePage() {
   const handleSave = (status: "draft" | "ready") => {
     const trimmedTitle = title.trim() || activeArticle?.title || "未命名文章";
     const trimmedContent = markdown.trim();
+    const resolvedTopic = resolveTopic({
+      rewriteTopic: topic,
+      article: activeArticle,
+      keyword,
+      fallbackTitle: trimmedTitle,
+    });
 
     if (!trimmedContent) {
       setError("请先生成或填写正文内容再保存。");
       return;
     }
 
-    const list = loadDrafts();
     const now = new Date().toISOString();
-    const id = draftId ?? crypto.randomUUID();
     const payload: DraftItem = {
-      id,
+      id: draftId ?? crypto.randomUUID(),
       title: trimmedTitle,
       content: trimmedContent,
       status,
       updatedAt: now,
+      topic: resolvedTopic,
       sourceTitle: activeArticle?.title,
-      sourceUrl: activeArticle?.url,
+      sourceUrl: activeDetail?.article_url || activeArticle?.url,
     };
 
-    const next = list.some((item) => item.id === id)
-      ? list.map((item) => (item.id === id ? payload : item))
-      : [payload, ...list];
-
-    saveDrafts(next);
-    setDraftId(id);
+    if (draftId) {
+      const list = loadDrafts();
+      const next = list.some((item) => item.id === draftId)
+        ? list.map((item) => (item.id === draftId ? payload : item))
+        : [payload, ...list];
+      saveDrafts(next);
+      setDraftId(draftId);
+    } else {
+      const id = upsertDraft(payload);
+      setDraftId(id);
+    }
     setSaveMessage(status === "draft" ? "草稿已保存" : "已保存到发布管理");
   };
+
+  const selectedArticles = useMemo(
+    () => articles.filter((article) => selectedUrls.includes(article.url)),
+    [articles, selectedUrls]
+  );
+
+  const toggleSelected = (url: string) => {
+    setSelectedUrls((prev) =>
+      prev.includes(url) ? prev.filter((item) => item !== url) : [...prev, url]
+    );
+  };
+
+  const handleSelectAll = () => {
+    setSelectedUrls(articles.map((article) => article.url));
+  };
+
+  const handleClearSelection = () => {
+    setSelectedUrls([]);
+  };
+
+  const handleBatchRewrite = async () => {
+    if (selectedArticles.length === 0 || batchRewriting) return;
+
+    setBatchRewriting(true);
+    setBatchMessage(null);
+    setError(null);
+
+    let successCount = 0;
+    let failureCount = 0;
+
+    for (const article of selectedArticles) {
+      setRewriteStatus((prev) => ({
+        ...prev,
+        [article.url]: { status: "loading" },
+      }));
+
+      try {
+        const result = await rewriteArticle(article);
+        const now = new Date().toISOString();
+        upsertDraft({
+          id: crypto.randomUUID(),
+          title: result.title,
+          content: result.content,
+          status: "ready",
+          updatedAt: now,
+          topic: result.topic,
+          sourceTitle: article.title,
+          sourceUrl: result.sourceUrl,
+        });
+
+        successCount += 1;
+        setRewriteStatus((prev) => ({
+          ...prev,
+          [article.url]: { status: "success", topic: result.topic },
+        }));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "改写失败";
+        failureCount += 1;
+        setRewriteStatus((prev) => ({
+          ...prev,
+          [article.url]: { status: "error", error: message },
+        }));
+      }
+    }
+
+    if (successCount > 0) {
+      setBatchMessage(
+        `已同步 ${successCount} 篇到发布管理${
+          failureCount ? `，失败 ${failureCount} 篇` : ""
+        }`
+      );
+      setSelectedUrls([]);
+    } else if (failureCount > 0) {
+      setBatchMessage(`改写失败 ${failureCount} 篇`);
+    }
+
+    setBatchRewriting(false);
+  };
+
+  const isBusy = rewriteLoading || batchRewriting;
 
   return (
     <div className="space-y-8">
@@ -400,7 +622,7 @@ export default function CreatePage() {
               <Button
                 className="rounded-full"
                 onClick={fetchArticles}
-                disabled={isLoading}
+                disabled={isLoading || isBusy}
               >
                 {isLoading ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -413,6 +635,48 @@ export default function CreatePage() {
               默认抓取 5 篇，自动去重。
             </p>
             {error ? <p className="text-xs text-rose-600">{error}</p> : null}
+            {articles.length > 0 ? (
+              <div className="rounded-xl border border-border/60 bg-white/60 p-3 text-xs">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-muted-foreground">
+                    已选 {selectedUrls.length} / {articles.length} 篇
+                  </span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 rounded-full"
+                      onClick={handleSelectAll}
+                      disabled={batchRewriting}
+                    >
+                      全选
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 rounded-full"
+                      onClick={handleClearSelection}
+                      disabled={selectedUrls.length === 0 || batchRewriting}
+                    >
+                      清空
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="h-7 rounded-full"
+                      onClick={handleBatchRewrite}
+                      disabled={selectedUrls.length === 0 || batchRewriting}
+                    >
+                      {batchRewriting ? "批量改写中..." : "批量改写并同步"}
+                    </Button>
+                  </div>
+                </div>
+                {batchMessage ? (
+                  <div className="mt-2 text-xs text-emerald-600">
+                    {batchMessage}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
 
             <div className="space-y-3">
               {articles.length === 0 ? (
@@ -421,7 +685,11 @@ export default function CreatePage() {
                 </div>
               ) : (
                 articles.map((article) => {
-                  const isRewriting = rewriteLoading && rewriteTarget === article.url;
+                  const status = rewriteStatus[article.url];
+                  const isSelected = selectedUrls.includes(article.url);
+                  const isRewriting =
+                    status?.status === "loading" ||
+                    (rewriteLoading && rewriteTarget === article.url);
                   return (
                     <div
                       key={`${article.wx_id}-${article.short_link}`}
@@ -429,10 +697,20 @@ export default function CreatePage() {
                         activeArticle?.url === article.url
                           ? "border-foreground"
                           : "hover:border-foreground"
-                      }`}
+                      } ${isSelected ? "ring-1 ring-foreground/20" : ""}`}
                     >
-                      <div className="text-sm font-medium line-clamp-2">
-                        {article.title}
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="text-sm font-medium line-clamp-2">
+                          {article.title}
+                        </div>
+                        <input
+                          type="checkbox"
+                          aria-label="选择文章"
+                          checked={isSelected}
+                          onChange={() => toggleSelected(article.url)}
+                          disabled={batchRewriting}
+                          className="mt-1 h-4 w-4 accent-foreground"
+                        />
                       </div>
                       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                         <span>阅读 {formatCompact(Number(article.read))}</span>
@@ -457,7 +735,7 @@ export default function CreatePage() {
                           size="sm"
                           className="rounded-full"
                           onClick={() => handleRewrite(article)}
-                          disabled={rewriteLoading}
+                          disabled={rewriteLoading || batchRewriting}
                         >
                           {isRewriting ? (
                             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -482,6 +760,16 @@ export default function CreatePage() {
                           </a>
                         </Button>
                       </div>
+                      {status?.status === "success" ? (
+                        <div className="mt-2 text-xs text-emerald-600">
+                          已改写并同步{status.topic ? ` · ${status.topic}` : ""}
+                        </div>
+                      ) : null}
+                      {status?.status === "error" ? (
+                        <div className="mt-2 text-xs text-rose-600">
+                          {status.error}
+                        </div>
+                      ) : null}
                     </div>
                   );
                 })
@@ -542,13 +830,12 @@ export default function CreatePage() {
               value={title}
               onChange={(event) => setTitle(event.target.value)}
             />
-
-            {rewriteLoading ? (
-              <div className="mt-4 flex items-center gap-2 rounded-xl border border-dashed border-border/70 bg-white/60 px-3 py-2 text-xs text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                正在改写中，请稍候...
-              </div>
-            ) : null}
+            <Input
+              className="mt-2"
+              placeholder="主题（可手动修改）"
+              value={topic}
+              onChange={(event) => setTopic(event.target.value)}
+            />
 
             {coverImage ? (
               <div className="mt-4 overflow-hidden rounded-2xl border border-border/60">
@@ -557,30 +844,40 @@ export default function CreatePage() {
             ) : null}
 
             <Tabs defaultValue="edit" className="mt-5">
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="edit">编辑</TabsTrigger>
-                <TabsTrigger value="preview">预览</TabsTrigger>
-              </TabsList>
+              <div className="flex items-center justify-between">
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="edit">编辑</TabsTrigger>
+                  <TabsTrigger value="preview">预览</TabsTrigger>
+                </TabsList>
+                {rewriteLoading ? (
+                  <div className="ml-3 flex items-center gap-2 text-xs text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    改写中...
+                  </div>
+                ) : null}
+              </div>
               <TabsContent value="edit" className="mt-4">
                 <Textarea
-                  className="min-h-[420px]"
+                  className="min-h-[500px] resize-none"
                   placeholder="请输入 Markdown 内容，支持标题、列表、引用等格式。"
                   value={markdown}
                   onChange={(event) => setMarkdown(event.target.value)}
                 />
               </TabsContent>
               <TabsContent value="preview" className="mt-4">
-                {markdown ? (
-                  <div className="prose prose-neutral max-w-none rounded-xl border border-border/60 bg-white/70 p-4">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {markdown}
-                    </ReactMarkdown>
-                  </div>
-                ) : (
-                  <div className="min-h-[420px] rounded-xl border border-dashed border-border/70 bg-white/60 p-4 text-sm text-muted-foreground">
-                    预览区域：改写完成后可查看排版预览。
-                  </div>
-                )}
+                <div className="min-h-[500px] rounded-xl border border-border/60 bg-white/70 p-4">
+                  {markdown ? (
+                    <div className="prose prose-neutral max-w-none">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {markdown}
+                      </ReactMarkdown>
+                    </div>
+                  ) : (
+                    <div className="flex h-[468px] items-center justify-center text-sm text-muted-foreground">
+                      预览区域：改写完成后可查看排版预览。
+                    </div>
+                  )}
+                </div>
               </TabsContent>
             </Tabs>
 

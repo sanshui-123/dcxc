@@ -9,7 +9,13 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 
 const navItems = [
   { href: "/prompts", label: "提示词", icon: FileText },
@@ -99,9 +105,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   </Button>
                 </SheetTrigger>
                 <SheetContent side="left" className="w-72">
-                  <div className="mb-6">
-                    <h2 className="text-lg font-semibold">珍峰冬虫夏草</h2>
-                  </div>
+                  <SheetHeader className="mb-2">
+                    <SheetTitle className="text-lg font-semibold">
+                      珍峰冬虫夏草
+                    </SheetTitle>
+                  </SheetHeader>
                   <NavLinks onNavigate={() => undefined} />
                 </SheetContent>
               </Sheet>

@@ -58,11 +58,53 @@ type PromptsApiResponse =
   | { ok: true; data: PromptItem[] }
   | { ok: false; error: string };
 
+type HotArticlesApiResponse =
+  | { ok: true; data: HotArticleItem[] }
+  | { ok: false; error: string };
+
 type PromptItem = {
   id: number;
   name: string;
   template: string;
   sortOrder: number;
+};
+
+type ArticleSource = "keyword" | "hot";
+
+type CreateArticle = {
+  source: ArticleSource;
+  title: string;
+  url: string;
+  read: number;
+  praise: number;
+  looking: number;
+  classify?: string;
+  wx_name?: string;
+  mpNickname?: string;
+  wx_id?: string;
+  short_link?: string;
+  ghid?: string;
+  publish_time?: number;
+  publish_time_str?: string;
+  [property: string]: unknown;
+};
+
+type HotArticleItem = {
+  title: string;
+  url: string;
+  category: string;
+  cover?: string;
+  wxid?: string;
+  mpNickname?: string;
+  pubTime?: string;
+  publishType?: string;
+  position?: number;
+  isOriginal?: string;
+  readNum?: number;
+  zanNum?: number;
+  avg?: number;
+  hot?: number;
+  fans?: number;
 };
 
 type DraftItem = {
@@ -95,7 +137,7 @@ function formatCompact(value: number) {
   return `${Math.round(value)}`;
 }
 
-function getEngagement(article: DajialaArticle) {
+function getEngagement(article: CreateArticle) {
   const read = Number(article.read) || 0;
   const praise = Number(article.praise) || 0;
   const looking = Number(article.looking) || 0;
@@ -123,7 +165,7 @@ function resolveTopic({
   fallbackTitle,
 }: {
   rewriteTopic?: string;
-  article?: DajialaArticle | null;
+  article?: CreateArticle | null;
   keyword?: string;
   fallbackTitle?: string;
 }) {
@@ -137,7 +179,7 @@ function resolveTopic({
   );
 }
 
-function dedupeArticles(items: DajialaArticle[]) {
+function dedupeArticles(items: CreateArticle[]) {
   const seen = new Set<string>();
   return items.filter((item) => {
     const key =
@@ -149,6 +191,43 @@ function dedupeArticles(items: DajialaArticle[]) {
     seen.add(key);
     return true;
   });
+}
+
+function toKeywordArticle(item: DajialaArticle): CreateArticle {
+  return {
+    source: "keyword",
+    title: item.title,
+    url: item.url,
+    read: Number(item.read) || 0,
+    praise: Number(item.praise) || 0,
+    looking: Number(item.looking) || 0,
+    classify: item.classify,
+    wx_id: item.wx_id,
+    short_link: item.short_link,
+    ghid: item.ghid,
+    publish_time: item.publish_time,
+    publish_time_str: item.publish_time_str,
+    ...item,
+  };
+}
+
+function toHotArticle(item: HotArticleItem): CreateArticle {
+  return {
+    source: "hot",
+    title: item.title,
+    url: item.url,
+    read: Number(item.readNum) || 0,
+    praise: Number(item.zanNum) || 0,
+    looking: 0,
+    classify: item.category,
+    wx_name: item.mpNickname,
+    mpNickname: item.mpNickname,
+    wx_id: item.wxid,
+    short_link: item.url,
+    publish_time_str: item.pubTime,
+    publish_time: item.pubTime ? Date.parse(item.pubTime) : 0,
+    ...item,
+  };
 }
 
 function loadDrafts(): DraftItem[] {
@@ -212,12 +291,17 @@ async function readApiJson<T>(res: Response, label: string) {
 export default function CreatePage() {
   const [keyword, setKeyword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [hotLoading, setHotLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [articles, setArticles] = useState<DajialaArticle[]>([]);
+  const [hotError, setHotError] = useState<string | null>(null);
+  const [activeSource, setActiveSource] =
+    useState<ArticleSource>("keyword");
+  const [keywordArticles, setKeywordArticles] = useState<CreateArticle[]>([]);
+  const [hotArticles, setHotArticles] = useState<CreateArticle[]>([]);
   const [articleCache, setArticleCache] = useState<
     Record<string, DajialaArticleHtmlData>
   >({});
-  const [activeArticle, setActiveArticle] = useState<DajialaArticle | null>(
+  const [activeArticle, setActiveArticle] = useState<CreateArticle | null>(
     null
   );
   const [activeDetail, setActiveDetail] =
@@ -245,6 +329,11 @@ export default function CreatePage() {
     Record<string, string>
   >({});
 
+  const currentArticles = useMemo(
+    () => (activeSource === "keyword" ? keywordArticles : hotArticles),
+    [activeSource, keywordArticles, hotArticles]
+  );
+
   useEffect(() => {
     const cached = localStorage.getItem(STORAGE_KEY);
     if (!cached) return;
@@ -252,14 +341,22 @@ export default function CreatePage() {
       const parsed = JSON.parse(cached) as {
         keyword?: string;
         articles?: DajialaArticle[];
+        keywordArticles?: CreateArticle[];
+        activeSource?: ArticleSource;
         articleCache?: Record<string, DajialaArticleHtmlData>;
         activeUrl?: string;
       };
       setKeyword(parsed.keyword ?? "");
-      setArticles(parsed.articles ?? []);
+      const storedKeyword =
+        parsed.keywordArticles ??
+        (parsed.articles?.map(toKeywordArticle) ?? []);
+      setKeywordArticles(storedKeyword);
       setArticleCache(parsed.articleCache ?? {});
-      if (parsed.activeUrl && parsed.articles) {
-        const matched = parsed.articles.find(
+      const source =
+        parsed.activeSource === "hot" ? "hot" : "keyword";
+      setActiveSource(source);
+      if (source === "keyword" && parsed.activeUrl && storedKeyword) {
+        const matched = storedKeyword.find(
           (item) => item.url === parsed.activeUrl
         );
         if (matched) {
@@ -268,19 +365,20 @@ export default function CreatePage() {
         }
       }
     } catch {
-      setArticles([]);
+      setKeywordArticles([]);
     }
   }, []);
 
   useEffect(() => {
     const payload = {
       keyword,
-      articles,
+      keywordArticles,
       articleCache,
       activeUrl: activeArticle?.url ?? "",
+      activeSource,
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-  }, [keyword, articles, articleCache, activeArticle]);
+  }, [keyword, keywordArticles, articleCache, activeArticle, activeSource]);
 
   useEffect(() => {
     if (!saveMessage) return;
@@ -297,7 +395,10 @@ export default function CreatePage() {
   useEffect(() => {
     setSelectedUrls([]);
     setRewriteStatus({});
-  }, [articles]);
+    setActiveArticle(null);
+    setActiveDetail(null);
+    setDetailError(null);
+  }, [currentArticles, activeSource]);
 
   useEffect(() => {
     const loadPrompts = async () => {
@@ -327,6 +428,38 @@ export default function CreatePage() {
     loadPrompts();
   }, []);
 
+  useEffect(() => {
+    const loadHot = async () => {
+      setHotLoading(true);
+      setHotError(null);
+      try {
+        const res = await fetch("/api/hot-articles?category=17&limit=5");
+        const parsed = await readApiJson<HotArticlesApiResponse>(
+          res,
+          "爆文接口"
+        );
+        if (!parsed.ok) {
+          setHotError(parsed.error);
+          return;
+        }
+        const data = parsed.data;
+        if (!res.ok || !data.ok) {
+          setHotError(!data.ok ? data.error : "获取爆文失败。");
+          return;
+        }
+        const items = data.data.map(toHotArticle);
+        setHotArticles(items);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "获取爆文失败";
+        setHotError(message);
+      } finally {
+        setHotLoading(false);
+      }
+    };
+
+    loadHot();
+  }, []);
+
   const activeHtml = useMemo(() => {
     if (!activeDetail?.html) return "";
     return stripScripts(activeDetail.html);
@@ -346,7 +479,7 @@ export default function CreatePage() {
       let changed = false;
       const next = { ...prev };
 
-      for (const article of articles) {
+      for (const article of currentArticles) {
         const current = next[article.url];
         if (!current || !promptIds.has(current)) {
           next[article.url] = defaultPromptId;
@@ -356,9 +489,9 @@ export default function CreatePage() {
 
       return changed ? next : prev;
     });
-  }, [articles, defaultPromptId, prompts]);
+  }, [currentArticles, defaultPromptId, prompts]);
 
-  const requestArticleHtml = async (article: DajialaArticle) => {
+  const requestArticleHtml = async (article: CreateArticle) => {
     const cached = articleCache[article.url];
     if (cached) return cached;
 
@@ -427,8 +560,10 @@ export default function CreatePage() {
       }
 
       const rawList = data.data.data ?? [];
-      const unique = dedupeArticles(rawList);
-      setArticles(unique.slice(0, 5));
+      const mapped = rawList.map(toKeywordArticle);
+      const unique = dedupeArticles(mapped);
+      setKeywordArticles(unique.slice(0, 5));
+      setActiveSource("keyword");
     } catch (err) {
       const message = err instanceof Error ? err.message : "抓取失败";
       setError(message);
@@ -437,7 +572,43 @@ export default function CreatePage() {
     }
   };
 
-  const loadArticleHtml = async (article: DajialaArticle) => {
+  const fetchHotArticles = async () => {
+    setHotLoading(true);
+    setHotError(null);
+    try {
+      const res = await fetch("/api/hot-articles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          category: 17,
+          limit: 5,
+        }),
+      });
+      const parsed = await readApiJson<HotArticlesApiResponse>(
+        res,
+        "爆文接口"
+      );
+      if (!parsed.ok) {
+        setHotError(parsed.error);
+        return;
+      }
+      const data = parsed.data;
+      if (!res.ok || !data.ok) {
+        setHotError(!data.ok ? data.error : "获取爆文失败。");
+        return;
+      }
+      const items = data.data.map(toHotArticle);
+      setHotArticles(items);
+      setActiveSource("hot");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "获取爆文失败";
+      setHotError(message);
+    } finally {
+      setHotLoading(false);
+    }
+  };
+
+  const loadArticleHtml = async (article: CreateArticle) => {
     setActiveArticle(article);
     setDetailError(null);
 
@@ -464,7 +635,7 @@ export default function CreatePage() {
   };
 
   const rewriteArticle = async (
-    article: DajialaArticle,
+    article: CreateArticle,
     promptId?: string
   ) => {
     const detail = await requestArticleHtml(article);
@@ -513,7 +684,7 @@ export default function CreatePage() {
     };
   };
 
-  const handleRewrite = async (article: DajialaArticle) => {
+  const handleRewrite = async (article: CreateArticle) => {
     setRewriteLoading(true);
     setRewriteTarget(article.url);
     setError(null);
@@ -611,8 +782,8 @@ export default function CreatePage() {
   };
 
   const selectedArticles = useMemo(
-    () => articles.filter((article) => selectedUrls.includes(article.url)),
-    [articles, selectedUrls]
+    () => currentArticles.filter((article) => selectedUrls.includes(article.url)),
+    [currentArticles, selectedUrls]
   );
 
   const toggleSelected = (url: string) => {
@@ -626,7 +797,7 @@ export default function CreatePage() {
   };
 
   const handleSelectAll = () => {
-    setSelectedUrls(articles.map((article) => article.url));
+    setSelectedUrls(currentArticles.map((article) => article.url));
   };
 
   const handleClearSelection = () => {
@@ -751,33 +922,80 @@ export default function CreatePage() {
             <CardTitle className="text-base font-semibold">选题来源</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex gap-2">
-              <Input
-                placeholder="输入关键词，例如：冬虫夏草"
-                value={keyword}
-                onChange={(event) => setKeyword(event.target.value)}
-              />
+            <div className="flex flex-wrap items-center gap-2">
               <Button
-                className="rounded-full"
-                onClick={fetchArticles}
-                disabled={isLoading || isBusy}
+                size="sm"
+                variant={activeSource === "keyword" ? "default" : "outline"}
+                className="h-7 rounded-full"
+                onClick={() => setActiveSource("keyword")}
               >
-                {isLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  "抓取"
-                )}
+                关键词抓取
+              </Button>
+              <Button
+                size="sm"
+                variant={activeSource === "hot" ? "default" : "outline"}
+                className="h-7 rounded-full"
+                onClick={() => setActiveSource("hot")}
+              >
+                健康爆文
               </Button>
             </div>
-            <p className="text-xs text-muted-foreground">
-              默认抓取 5 篇，自动去重。
-            </p>
-            {error ? <p className="text-xs text-rose-600">{error}</p> : null}
-            {articles.length > 0 ? (
+
+            {activeSource === "keyword" ? (
+              <>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="输入关键词，例如：冬虫夏草"
+                    value={keyword}
+                    onChange={(event) => setKeyword(event.target.value)}
+                  />
+                  <Button
+                    className="rounded-full"
+                    onClick={fetchArticles}
+                    disabled={isLoading || isBusy}
+                  >
+                    {isLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      "抓取"
+                    )}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  默认抓取 5 篇，自动去重。
+                </p>
+                {error ? (
+                  <p className="text-xs text-rose-600">{error}</p>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <div className="flex gap-2">
+                  <Button
+                    className="rounded-full"
+                    onClick={fetchHotArticles}
+                    disabled={hotLoading || isBusy}
+                  >
+                    {hotLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      "抓取健康爆文"
+                    )}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  默认抓取 5 篇，分类：健康。
+                </p>
+                {hotError ? (
+                  <p className="text-xs text-rose-600">{hotError}</p>
+                ) : null}
+              </>
+            )}
+            {currentArticles.length > 0 ? (
               <div className="rounded-xl border border-border/60 bg-white/60 p-3 text-xs">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-muted-foreground">
-                    已选 {selectedUrls.length} / {articles.length} 篇
+                    已选 {selectedUrls.length} / {currentArticles.length} 篇
                   </span>
                   <div className="flex flex-wrap items-center gap-2">
                     <Button
@@ -817,12 +1035,14 @@ export default function CreatePage() {
             ) : null}
 
             <div className="space-y-3">
-              {articles.length === 0 ? (
+              {currentArticles.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-border/60 bg-white/60 p-4 text-xs text-muted-foreground">
-                  暂无数据，输入关键词后点击“抓取”。
+                  {activeSource === "keyword"
+                    ? "暂无数据，输入关键词后点击“抓取”。"
+                    : "暂无数据，点击“抓取健康爆文”。"}
                 </div>
               ) : (
-                articles.map((article) => {
+                currentArticles.map((article) => {
                   const status = rewriteStatus[article.url];
                   const isSelected = selectedUrls.includes(article.url);
                   const isRewriting =
@@ -957,9 +1177,11 @@ export default function CreatePage() {
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <p className="text-sm font-medium">正文预览</p>
-                {activeArticle ? (
+                {activeArticle?.wx_name || activeArticle?.mpNickname || activeArticle?.wx_id ? (
                   <Badge variant="secondary" className="rounded-full">
-                    {activeArticle.wx_name}
+                    {activeArticle.wx_name ||
+                      activeArticle.mpNickname ||
+                      activeArticle.wx_id}
                   </Badge>
                 ) : null}
               </div>

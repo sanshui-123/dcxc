@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
+  ChevronDown,
+  ChevronRight,
   Loader2,
   Plus,
   Save,
@@ -54,6 +56,7 @@ export default function PromptsPage() {
   const [autoSaveState, setAutoSaveState] = useState<
     Record<number, AutoSaveState>
   >({});
+  const [expandedPrompts, setExpandedPrompts] = useState<Record<number, boolean>>({});
   const promptsRef = useRef<PromptItem[]>([]);
   const autosaveTimers = useRef<Record<number, number>>({});
   const autosaveResetTimers = useRef<Record<number, number>>({});
@@ -422,15 +425,56 @@ export default function PromptsPage() {
                     这里只填写自定义改写要求，系统会自动追加统一格式（JSON +
                     图片占位符 + 原文占位符）。
                   </p>
-                  <Textarea
-                    className="min-h-[220px]"
-                    value={prompt.template}
-                    onChange={(event) =>
-                      updatePrompt(prompt.id, {
-                        template: event.target.value,
-                      })
-                    }
-                  />
+
+                  {/* 折叠/展开控制 */}
+                  <div className="space-y-2">
+                    {!expandedPrompts[prompt.id] ? (
+                      /* 预览模式 */
+                      <div
+                        className="relative min-h-[60px] rounded-lg border border-border/60 bg-muted/30 px-4 py-3 cursor-pointer hover:bg-muted/50 transition-colors"
+                        onClick={() =>
+                          setExpandedPrompts((prev) => ({
+                            ...prev,
+                            [prompt.id]: true,
+                          }))
+                        }
+                      >
+                        <p className="pr-8 text-sm text-muted-foreground line-clamp-3">
+                          {prompt.template || "暂无内容"}
+                        </p>
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 text-xs text-muted-foreground">
+                          <span>点击展开</span>
+                          <ChevronDown className="h-4 w-4" />
+                        </div>
+                      </div>
+                    ) : (
+                      /* 编辑模式 */
+                      <div className="space-y-2">
+                        <Textarea
+                          className="min-h-[220px]"
+                          value={prompt.template}
+                          onChange={(event) =>
+                            updatePrompt(prompt.id, {
+                              template: event.target.value,
+                            })
+                          }
+                        />
+                        <button
+                          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                          onClick={() =>
+                            setExpandedPrompts((prev) => ({
+                              ...prev,
+                              [prompt.id]: false,
+                            }))
+                          }
+                        >
+                          <ChevronRight className="h-4 w-4" />
+                          收起
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
                   <p className="text-xs text-muted-foreground">
                     （高级）如需手动编排，可使用占位符：
                     {"{{title}}、{{sourceUrl}}、{{html}}"}

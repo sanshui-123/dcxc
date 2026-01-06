@@ -62,3 +62,34 @@ export interface DajialaArticleHtmlData {
   wxid: string;
   [property: string]: unknown;
 }
+
+export interface DajialaHotResponse {
+  code: number;
+  cost: number;
+  data: DajialaHotArticle[];
+  msg: string;
+  note: string;
+  remain_money: number;
+  total: number;
+  total_page: number;
+  [property: string]: unknown;
+}
+
+export interface DajialaHotArticle {
+  avg: number;
+  category: string;
+  cover: string;
+  fans: number;
+  hot: number;
+  is_original: string;
+  mp_nickname: string;
+  position: number;
+  pub_time: string;
+  publish_type: string;
+  read_num: number;
+  title: string;
+  url: string;
+  wxid: string;
+  zan_num: number;
+  [property: string]: unknown;
+}

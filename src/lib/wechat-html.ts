@@ -1,15 +1,15 @@
 const STYLE = {
   section:
-    "padding:0 16px;font-size:17px;line-height:1.6;color:rgba(0,0,0,0.9);letter-spacing:0.5px;text-align:justify;font-family:\"PingFang SC\",system-ui,-apple-system,\"Helvetica Neue\",\"Hiragino Sans GB\",\"Microsoft YaHei\",Arial,sans-serif;background-color:#ffffff;",
-  p: "margin:0 0 12px;line-height:1.6;text-align:justify;",
-  h2: "margin:14px 0 8px;font-size:18px;line-height:1.6;font-weight:700;letter-spacing:2px;color:rgb(11,139,102);",
-  h3: "margin:12px 0 6px;font-size:17px;line-height:1.6;font-weight:700;letter-spacing:1px;color:rgb(11,139,102);",
-  ul: "margin:0 0 12px;padding-left:18px;line-height:1.6;",
-  ol: "margin:0 0 12px;padding-left:18px;line-height:1.6;",
+    "font-size:17px;line-height:1.6;color:rgba(0,0,0,0.9);letter-spacing:0.544px;font-family:\"PingFang SC\",system-ui,-apple-system,\"Helvetica Neue\",\"Hiragino Sans GB\",\"Microsoft YaHei\",Arial,sans-serif;background-color:#ffffff;",
+  p: "margin:0 16px 12px;line-height:1.6;text-align:justify;",
+  h2: "margin:12px 16px 8px;font-size:18px;line-height:1.6;font-weight:700;letter-spacing:2px;color:rgb(11,139,102);",
+  h3: "margin:10px 16px 6px;font-size:17px;line-height:1.6;font-weight:700;letter-spacing:1px;color:rgb(11,139,102);",
+  ul: "margin:0 16px 12px;padding-left:18px;line-height:1.6;text-align:justify;",
+  ol: "margin:0 16px 12px;padding-left:18px;line-height:1.6;text-align:justify;",
   li: "margin:4px 0;",
   blockquote:
-    "margin:0 0 12px;padding:10px 12px;background:#f5f5f5;border-left:3px solid #e0e0e0;color:#666666;font-size:16px;line-height:1.6;",
-  imgWrap: "margin:0 0 12px;text-align:center;",
+    "margin:0 16px 12px;padding:10px 12px;background:#f5f5f5;border-left:3px solid #e0e0e0;color:#666666;font-size:16px;line-height:1.6;",
+  imgWrap: "margin:0 16px 12px;text-align:center;line-height:1.6;",
   img: "width:100%;height:auto;display:block;margin:0 auto;",
   strong: "font-weight:700;color:rgb(51,51,51);",
   code:

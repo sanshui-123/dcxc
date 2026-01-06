@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -30,6 +30,8 @@ type PromptsApiResponse =
   | { ok: true; data: PromptItem[] }
   | { ok: false; error: string };
 
+type AutoSaveState = "idle" | "saving" | "saved" | "error";
+
 async function readApiJson<T>(res: Response, label: string) {
   const parsed = await readJson<T>(res);
   if (!parsed.ok) {
@@ -49,6 +51,12 @@ export default function PromptsPage() {
   const [movingId, setMovingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [autoSaveState, setAutoSaveState] = useState<
+    Record<number, AutoSaveState>
+  >({});
+  const promptsRef = useRef<PromptItem[]>([]);
+  const autosaveTimers = useRef<Record<number, number>>({});
+  const autosaveResetTimers = useRef<Record<number, number>>({});
 
   const fetchPrompts = async () => {
     setLoading(true);
@@ -79,15 +87,102 @@ export default function PromptsPage() {
   }, []);
 
   useEffect(() => {
+    promptsRef.current = prompts;
+  }, [prompts]);
+
+  useEffect(() => {
     if (!message) return;
     const timer = window.setTimeout(() => setMessage(null), 2000);
     return () => window.clearTimeout(timer);
   }, [message]);
 
+  useEffect(() => {
+    return () => {
+      Object.values(autosaveTimers.current).forEach((timer) =>
+        window.clearTimeout(timer)
+      );
+      Object.values(autosaveResetTimers.current).forEach((timer) =>
+        window.clearTimeout(timer)
+      );
+    };
+  }, []);
+
+  const markAutoSaveState = (id: number, state: AutoSaveState) => {
+    setAutoSaveState((prev) => ({ ...prev, [id]: state }));
+    if (state === "saved") {
+      const existing = autosaveResetTimers.current[id];
+      if (existing) window.clearTimeout(existing);
+      autosaveResetTimers.current[id] = window.setTimeout(() => {
+        setAutoSaveState((prev) => ({ ...prev, [id]: "idle" }));
+      }, 1600);
+    }
+  };
+
+  const savePrompt = async (prompt: PromptItem, mode: "manual" | "auto") => {
+    if (mode === "manual") {
+      setSavingId(prompt.id);
+    } else {
+      markAutoSaveState(prompt.id, "saving");
+    }
+    setError(null);
+    try {
+      const res = await fetch(`/api/prompts/${prompt.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: prompt.name,
+          template: prompt.template,
+        }),
+      });
+      const parsed = await readApiJson<
+        | { ok: true; data: PromptItem }
+        | { ok: false; error: string }
+      >(res, "更新提示词");
+      if (!parsed.ok) {
+        setError(parsed.error);
+        if (mode === "auto") markAutoSaveState(prompt.id, "error");
+        return;
+      }
+      const data = parsed.data;
+      if (!res.ok || !data.ok) {
+        setError(!data.ok ? data.error : "更新提示词失败。");
+        if (mode === "auto") markAutoSaveState(prompt.id, "error");
+        return;
+      }
+      setPrompts((prev) =>
+        prev.map((item) => (item.id === prompt.id ? data.data : item))
+      );
+      if (mode === "manual") {
+        setMessage("提示词已保存");
+      } else {
+        markAutoSaveState(prompt.id, "saved");
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "更新提示词失败";
+      setError(errorMessage);
+      if (mode === "auto") markAutoSaveState(prompt.id, "error");
+    } finally {
+      if (mode === "manual") {
+        setSavingId(null);
+      }
+    }
+  };
+
+  const scheduleAutoSave = (id: number) => {
+    const existing = autosaveTimers.current[id];
+    if (existing) window.clearTimeout(existing);
+    autosaveTimers.current[id] = window.setTimeout(() => {
+      const prompt = promptsRef.current.find((item) => item.id === id);
+      if (!prompt) return;
+      savePrompt(prompt, "auto");
+    }, 800);
+  };
+
   const updatePrompt = (id: number, patch: Partial<PromptItem>) => {
     setPrompts((prev) =>
       prev.map((prompt) => (prompt.id === id ? { ...prompt, ...patch } : prompt))
     );
+    scheduleAutoSave(id);
   };
 
   const handleCreate = async () => {
@@ -123,40 +218,7 @@ export default function PromptsPage() {
   };
 
   const handleSave = async (prompt: PromptItem) => {
-    setSavingId(prompt.id);
-    setError(null);
-    try {
-      const res = await fetch(`/api/prompts/${prompt.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: prompt.name,
-          template: prompt.template,
-        }),
-      });
-      const parsed = await readApiJson<
-        | { ok: true; data: PromptItem }
-        | { ok: false; error: string }
-      >(res, "更新提示词");
-      if (!parsed.ok) {
-        setError(parsed.error);
-        return;
-      }
-      const data = parsed.data;
-      if (!res.ok || !data.ok) {
-        setError(!data.ok ? data.error : "更新提示词失败。");
-        return;
-      }
-      setPrompts((prev) =>
-        prev.map((item) => (item.id === prompt.id ? data.data : item))
-      );
-      setMessage("提示词已保存");
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "更新提示词失败";
-      setError(errorMessage);
-    } finally {
-      setSavingId(null);
-    }
+    await savePrompt(prompt, "manual");
   };
 
   const handleDelete = async (promptId: number) => {
@@ -294,6 +356,21 @@ export default function PromptsPage() {
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
+                    {autoSaveState[prompt.id] === "saving" && (
+                      <span className="text-xs text-muted-foreground">
+                        自动保存中...
+                      </span>
+                    )}
+                    {autoSaveState[prompt.id] === "saved" && (
+                      <span className="text-xs text-emerald-600">
+                        已自动保存
+                      </span>
+                    )}
+                    {autoSaveState[prompt.id] === "error" && (
+                      <span className="text-xs text-rose-600">
+                        自动保存失败
+                      </span>
+                    )}
                     <Button
                       variant="outline"
                       size="sm"

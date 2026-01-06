@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { readJson } from "@/lib/http";
+import { formatWechatHtml } from "@/lib/wechat-html";
 
 const API_URL = "https://wx.limyai.com/api/openapi/wechat-publish";
 
@@ -32,17 +33,29 @@ export async function POST(req: Request) {
     );
   }
 
+  const articleType =
+    typeof body.articleType === "string" ? body.articleType : "news";
+  const contentFormat =
+    typeof body.contentFormat === "string" ? body.contentFormat : "markdown";
+
+  const formattedContent =
+    articleType === "news" && contentFormat === "markdown"
+      ? formatWechatHtml(content)
+      : content;
+  const outgoingFormat =
+    articleType === "news" && contentFormat === "markdown"
+      ? "html"
+      : contentFormat;
+
   const payload = {
     wechatAppid,
     title,
-    content,
+    content: formattedContent,
     summary: typeof body.summary === "string" ? body.summary : undefined,
     coverImage: typeof body.coverImage === "string" ? body.coverImage : undefined,
     author: typeof body.author === "string" ? body.author : undefined,
-    contentFormat:
-      typeof body.contentFormat === "string" ? body.contentFormat : "markdown",
-    articleType:
-      typeof body.articleType === "string" ? body.articleType : "news",
+    contentFormat: outgoingFormat,
+    articleType,
   };
 
   try {

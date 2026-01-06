@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { readJson } from "@/lib/http";
+import { prisma } from "@/lib/prisma";
+import { DEFAULT_PROMPT_TEMPLATE, buildPromptTemplate } from "@/lib/prompts";
 
 const DEFAULT_MODEL = "glm-4.7";
 const DEFAULT_BASE_URL =
@@ -113,6 +115,123 @@ function resolveTopic(parsed: ParsedRewrite | null, fallback: string) {
   return normalizeTopic(raw) || normalizeTopic(fallback) || "未分类";
 }
 
+function stripTitleExtras(value: string) {
+  return value
+    .replace(/^[\"'“”‘’\s]+|[\"'“”‘’\s]+$/g, "")
+    .replace(/\s+/g, " ")
+    .replace(/[\r\n]+/g, " ")
+    .trim();
+}
+
+function clampTitle(value: string, maxLength = 64) {
+  const trimmed = stripTitleExtras(value);
+  if (!trimmed) return "未命名文章";
+  const chars = Array.from(trimmed);
+  if (chars.length <= maxLength) return trimmed;
+  return chars.slice(0, maxLength).join("");
+}
+
+function isListLikeTitle(title: string) {
+  return /^\s*[\d一二三四五六七八九十]+[.、\)\]]/.test(title);
+}
+
+function isTitleTooNumeric(title: string) {
+  const digits = title.match(/\d/g) || [];
+  const separators = title.match(/[，、]/g) || [];
+  const priceHint = /(钱|元|￥|¥|克|g|斤|两)/.test(title) && /\d/.test(title);
+  return digits.length >= 6 || separators.length >= 4 || priceHint;
+}
+
+function isTitleInvalid(title: string) {
+  const trimmed = stripTitleExtras(title);
+  if (!trimmed) return true;
+  const length = Array.from(trimmed).length;
+  if (length < 6 || length > 64) return true;
+  if (isListLikeTitle(trimmed)) return true;
+  if (isTitleTooNumeric(trimmed)) return true;
+  return false;
+}
+
+function stripMarkdownForTitle(markdown: string) {
+  return markdown
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/!\[[^\]]*]\([^)]+\)/g, "")
+    .replace(/\[[^\]]*]\([^)]+\)/g, "")
+    .replace(/[#>*_`~>-]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function rewriteTitle({
+  baseUrl,
+  apiKey,
+  model,
+  systemPrompt,
+  sourceTitle,
+  topic,
+  markdown,
+}: {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  systemPrompt: string;
+  sourceTitle: string;
+  topic: string;
+  markdown: string;
+}) {
+  const summary = stripMarkdownForTitle(markdown).slice(0, 300);
+  const titlePrompt = `请根据以下信息生成适合公众号的标题，仅输出标题文本，不要加引号或解释。
+要求：
+1) 18-28 字，最多不超过 64 字。
+2) 一句话标题，不要清单/配方/价格/序号列表形式。
+3) 语气克制、有温度，符合公众号读者阅读习惯。
+4) 避免夸大和夸张承诺，不包含疗效/治病承诺。
+
+原文标题：${sourceTitle || "无"}
+主题：${topic || "无"}
+正文摘要：${summary || "无"}
+`;
+
+  const res = await fetch(baseUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: titlePrompt },
+      ],
+      temperature: 0.4,
+    }),
+  });
+
+  if (!res.ok) return "";
+  const parsed = await readJson<{
+    choices?: Array<{ message?: { content?: string } }>;
+  }>(res);
+  if (!parsed.ok) return "";
+  return parsed.data.choices?.[0]?.message?.content?.trim() || "";
+}
+
+async function resolvePromptTemplate(promptId?: number) {
+  try {
+    if (promptId) {
+      const prompt = await prisma.prompt.findUnique({ where: { id: promptId } });
+      if (prompt?.template) return prompt.template;
+    }
+
+    const fallback = await prisma.prompt.findFirst({
+      orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
+    });
+    return fallback?.template || DEFAULT_PROMPT_TEMPLATE;
+  } catch {
+    return DEFAULT_PROMPT_TEMPLATE;
+  }
+}
+
 export async function POST(req: Request) {
   let body: Record<string, unknown> = {};
   try {
@@ -127,6 +246,12 @@ export async function POST(req: Request) {
     typeof body.coverUrl === "string" ? body.coverUrl : undefined;
   const sourceUrl =
     typeof body.sourceUrl === "string" ? body.sourceUrl : undefined;
+  const promptId =
+    typeof body.promptId === "number"
+      ? body.promptId
+      : typeof body.promptId === "string"
+        ? Number(body.promptId)
+        : undefined;
 
   if (!html) {
     return NextResponse.json(
@@ -149,7 +274,14 @@ export async function POST(req: Request) {
   const systemPrompt =
     "你是微信公众号资深编辑，擅长把原文改写成结构清晰、可直接发布的公众号文章。";
 
-  const userPrompt = `请根据提供的原文内容改写为新的公众号文章。\n要求：\n1) 输出 JSON，包含 title、topic、markdown 三个字段。\n2) topic 用 6-12 字概括文章主题。\n3) markdown 正文不需要再写 # 标题，使用常见排版模板：\n   - > 导语（2-3 句）\n   - ## 小标题（3-5 段）\n   - 要点清单（项目符号）\n   - 适用人群/注意事项\n   - 小结收束\n4) 在 markdown 中安排 {{IMAGE_1}} 与 {{IMAGE_2}} 两个图片占位符，用于插图位置。\n5) 正文不少于 1000 字（不包含空格/标点）。\n6) 文章语言为简体中文，逻辑清晰、段落分明、可读性强。\n7) 不要堆砌营销话术，不要添加未给出的事实，保持与原文一致的核心信息。\n8) 标题需改写为更适合公众号的表达，但不夸大。\n\n原文标题：${title || "无"}\n原文链接：${sourceUrl || "无"}\n原文 HTML：\n${html}\n`;
+  const promptTemplate = await resolvePromptTemplate(
+    Number.isFinite(promptId) ? promptId : undefined
+  );
+  const userPrompt = buildPromptTemplate(promptTemplate, {
+    title,
+    sourceUrl,
+    html,
+  });
 
   try {
     const res = await fetch(baseUrl, {
@@ -200,7 +332,9 @@ export async function POST(req: Request) {
     }
 
     const parsedContent = tryParseJSON(content);
-    const draftTitle = parsedContent?.title?.trim() || title || "未命名文章";
+    let draftTitle = clampTitle(
+      parsedContent?.title?.trim() || title || "未命名文章"
+    );
     const draftTopic = resolveTopic(parsedContent, draftTitle);
     let draftMarkdown = (parsedContent?.markdown?.trim() || content).trim();
 
@@ -238,6 +372,21 @@ export async function POST(req: Request) {
             snippet: expandParsed.text.slice(0, 120),
           });
         }
+      }
+    }
+
+    if (isTitleInvalid(draftTitle)) {
+      const improved = await rewriteTitle({
+        baseUrl,
+        apiKey,
+        model,
+        systemPrompt,
+        sourceTitle: title,
+        topic: draftTopic,
+        markdown: draftMarkdown,
+      });
+      if (improved) {
+        draftTitle = clampTitle(improved);
       }
     }
 

@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutGrid, PenSquare, Search, Send } from "lucide-react";
+import { useEffect, useState } from "react";
+import { FileText, PanelLeft, PenSquare, Search, Send } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -11,10 +12,12 @@ import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 
 const navItems = [
-  { href: "/", label: "概览", icon: LayoutGrid },
+  { href: "/prompts", label: "提示词", icon: FileText },
   { href: "/create", label: "内容创作", icon: PenSquare },
   { href: "/publish", label: "发布管理", icon: Send },
 ];
+
+const SIDEBAR_VISIBLE_KEY = "app-sidebar-visible-v1";
 
 function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
@@ -46,10 +49,32 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  const [sidebarVisible, setSidebarVisible] = useState(true);
+
+  useEffect(() => {
+    const stored = localStorage.getItem(SIDEBAR_VISIBLE_KEY);
+    if (stored === "false") {
+      setSidebarVisible(false);
+    }
+  }, []);
+
+  const toggleSidebar = () => {
+    setSidebarVisible((prev) => {
+      const next = !prev;
+      localStorage.setItem(SIDEBAR_VISIBLE_KEY, String(next));
+      return next;
+    });
+  };
+
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(255,246,230,0.9)_0%,_rgba(248,242,232,0.85)_40%,_rgba(255,255,255,0.95)_100%)]">
       <div className="flex min-h-screen">
-        <aside className="hidden w-64 flex-col border-r border-border/60 bg-white/60 px-5 py-6 backdrop-blur lg:flex">
+        <aside
+          className={cn(
+            "hidden w-56 flex-col border-r border-border/60 bg-white/60 px-4 py-6 backdrop-blur lg:flex",
+            !sidebarVisible && "lg:hidden"
+          )}
+        >
           <div className="flex items-center justify-between">
             <h1 className="text-lg font-semibold">珍峰冬虫夏草</h1>
           </div>
@@ -65,7 +90,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   <Button
                     variant="outline"
                     size="sm"
-                    className="lg:hidden"
+                    className={cn(
+                      "lg:hidden",
+                      !sidebarVisible && "lg:inline-flex"
+                    )}
                   >
                     菜单
                   </Button>
@@ -77,6 +105,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   <NavLinks onNavigate={() => undefined} />
                 </SheetContent>
               </Sheet>
+
+              <Button
+                variant="ghost"
+                size="icon"
+                className="hidden lg:inline-flex"
+                onClick={toggleSidebar}
+                aria-label={sidebarVisible ? "隐藏侧栏" : "显示侧栏"}
+              >
+                <PanelLeft className="h-4 w-4" />
+              </Button>
 
               <div className="flex min-w-[240px] flex-1 items-center gap-2 rounded-full border border-border/60 bg-white px-3 py-2">
                 <Search className="h-4 w-4 text-muted-foreground" />

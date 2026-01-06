@@ -232,6 +232,21 @@ export default function PublishPage() {
     );
   }, [items]);
 
+  useEffect(() => {
+    if (accounts.length === 0) return;
+    if (
+      selectedAppid &&
+      accounts.some((account) => account.wechatAppid === selectedAppid)
+    ) {
+      return;
+    }
+    const fallback = accounts[0]?.wechatAppid;
+    if (fallback) {
+      setSelectedAppid(fallback);
+      localStorage.setItem(DEFAULT_APPID_KEY, fallback);
+    }
+  }, [accounts, selectedAppid]);
+
   const handleRefresh = () => {
     setItems(loadDrafts());
   };
@@ -673,10 +688,12 @@ export default function PublishPage() {
                           className="h-4 w-4 accent-foreground"
                         />
                       </TableCell>
-                      <TableCell className="font-medium">
-                        <div>{item.title}</div>
+                      <TableCell className="font-medium align-top whitespace-normal">
+                        <div className="line-clamp-2 break-words">
+                          {item.title}
+                        </div>
                         {item.lastError ? (
-                          <div className="mt-1 text-xs text-rose-600">
+                          <div className="mt-1 text-xs text-rose-600 break-words">
                             {item.lastError}
                           </div>
                         ) : null}

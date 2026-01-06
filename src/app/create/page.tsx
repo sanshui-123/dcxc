@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   BookOpen,
@@ -30,6 +31,13 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
@@ -46,6 +54,17 @@ type RewriteApiResponse =
   | { ok: true; data: { title: string; content: string; topic?: string } }
   | { ok: false; error: string };
 
+type PromptsApiResponse =
+  | { ok: true; data: PromptItem[] }
+  | { ok: false; error: string };
+
+type PromptItem = {
+  id: number;
+  name: string;
+  template: string;
+  sortOrder: number;
+};
+
 type DraftItem = {
   id: string;
   title: string;
@@ -55,6 +74,7 @@ type DraftItem = {
   topic?: string;
   sourceTitle?: string;
   sourceUrl?: string;
+  promptId?: string;
   lastError?: string;
   publicationId?: string;
 };
@@ -218,6 +238,12 @@ export default function CreatePage() {
   const [rewriteStatus, setRewriteStatus] = useState<
     Record<string, RewriteStatus>
   >({});
+  const [prompts, setPrompts] = useState<PromptItem[]>([]);
+  const [promptsLoading, setPromptsLoading] = useState(false);
+  const [promptsError, setPromptsError] = useState<string | null>(null);
+  const [promptSelections, setPromptSelections] = useState<
+    Record<string, string>
+  >({});
 
   useEffect(() => {
     const cached = localStorage.getItem(STORAGE_KEY);
@@ -273,12 +299,64 @@ export default function CreatePage() {
     setRewriteStatus({});
   }, [articles]);
 
+  useEffect(() => {
+    const loadPrompts = async () => {
+      setPromptsLoading(true);
+      setPromptsError(null);
+      try {
+        const res = await fetch("/api/prompts");
+        const parsed = await readApiJson<PromptsApiResponse>(res, "提示词接口");
+        if (!parsed.ok) {
+          setPromptsError(parsed.error);
+          return;
+        }
+        const data = parsed.data;
+        if (!res.ok || !data.ok) {
+          setPromptsError(!data.ok ? data.error : "获取提示词失败。");
+          return;
+        }
+        setPrompts(data.data);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "获取提示词失败";
+        setPromptsError(message);
+      } finally {
+        setPromptsLoading(false);
+      }
+    };
+
+    loadPrompts();
+  }, []);
+
   const activeHtml = useMemo(() => {
     if (!activeDetail?.html) return "";
     return stripScripts(activeDetail.html);
   }, [activeDetail]);
 
   const coverImage = useMemo(() => getFirstImage(markdown), [markdown]);
+  const defaultPromptId = useMemo(
+    () => (prompts[0]?.id ? String(prompts[0].id) : ""),
+    [prompts]
+  );
+
+  useEffect(() => {
+    if (!defaultPromptId || prompts.length === 0) return;
+    const promptIds = new Set(prompts.map((prompt) => String(prompt.id)));
+
+    setPromptSelections((prev) => {
+      let changed = false;
+      const next = { ...prev };
+
+      for (const article of articles) {
+        const current = next[article.url];
+        if (!current || !promptIds.has(current)) {
+          next[article.url] = defaultPromptId;
+          changed = true;
+        }
+      }
+
+      return changed ? next : prev;
+    });
+  }, [articles, defaultPromptId, prompts]);
 
   const requestArticleHtml = async (article: DajialaArticle) => {
     const cached = articleCache[article.url];
@@ -385,7 +463,10 @@ export default function CreatePage() {
     }
   };
 
-  const rewriteArticle = async (article: DajialaArticle) => {
+  const rewriteArticle = async (
+    article: DajialaArticle,
+    promptId?: string
+  ) => {
     const detail = await requestArticleHtml(article);
     const sourceUrl = detail.article_url || article.url;
     const res = await fetch("/api/rewrite", {
@@ -396,6 +477,7 @@ export default function CreatePage() {
         html: detail.html,
         coverUrl: detail.cover_url,
         sourceUrl,
+        promptId,
       }),
     });
 
@@ -441,8 +523,12 @@ export default function CreatePage() {
     }));
 
     try {
+      const promptId = promptSelections[article.url] || defaultPromptId;
+      if (!promptId) {
+        throw new Error("请先创建并选择提示词。");
+      }
       await loadArticleHtml(article);
-      const result = await rewriteArticle(article);
+      const result = await rewriteArticle(article, promptId);
 
       setTitle(result.title);
       setMarkdown(result.content);
@@ -458,6 +544,7 @@ export default function CreatePage() {
         topic: result.topic,
         sourceTitle: article.title,
         sourceUrl: result.sourceUrl,
+        promptId,
       });
       setDraftId(id);
       setSaveMessage("改写完成，已同步到发布管理");
@@ -487,6 +574,9 @@ export default function CreatePage() {
       keyword,
       fallbackTitle: trimmedTitle,
     });
+    const selectedPromptId = activeArticle
+      ? promptSelections[activeArticle.url] || defaultPromptId
+      : defaultPromptId;
 
     if (!trimmedContent) {
       setError("请先生成或填写正文内容再保存。");
@@ -503,6 +593,7 @@ export default function CreatePage() {
       topic: resolvedTopic,
       sourceTitle: activeArticle?.title,
       sourceUrl: activeDetail?.article_url || activeArticle?.url,
+      promptId: selectedPromptId,
     };
 
     if (draftId) {
@@ -530,6 +621,10 @@ export default function CreatePage() {
     );
   };
 
+  const handlePromptSelect = (url: string, promptId: string) => {
+    setPromptSelections((prev) => ({ ...prev, [url]: promptId }));
+  };
+
   const handleSelectAll = () => {
     setSelectedUrls(articles.map((article) => article.url));
   };
@@ -555,7 +650,11 @@ export default function CreatePage() {
       }));
 
       try {
-        const result = await rewriteArticle(article);
+        const promptId = promptSelections[article.url] || defaultPromptId;
+        if (!promptId) {
+          throw new Error("请先创建并选择提示词。");
+        }
+        const result = await rewriteArticle(article, promptId);
         const now = new Date().toISOString();
         upsertDraft({
           id: crypto.randomUUID(),
@@ -566,6 +665,7 @@ export default function CreatePage() {
           topic: result.topic,
           sourceTitle: article.title,
           sourceUrl: result.sourceUrl,
+          promptId,
         });
 
         successCount += 1;
@@ -606,6 +706,44 @@ export default function CreatePage() {
         description="输入关键词抓取公众号文章，一键改写为 Markdown 并保存到发布管理。"
         badge="创作工作台"
       />
+
+      <Card className="border-border/60 bg-white/70">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="text-base font-semibold">提示词</CardTitle>
+            <p className="mt-1 text-xs text-muted-foreground">
+              改写时可为每篇文章选择提示词，统一格式已固定，默认使用第一个提示词。
+            </p>
+          </div>
+          <Button variant="outline" size="sm" className="rounded-full" asChild>
+            <Link href="/prompts">管理提示词</Link>
+          </Button>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {promptsError ? (
+            <p className="text-xs text-rose-600">{promptsError}</p>
+          ) : null}
+          {promptsLoading ? (
+            <div className="text-xs text-muted-foreground">提示词加载中...</div>
+          ) : prompts.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border/60 bg-white/60 p-3 text-xs text-muted-foreground">
+              暂无提示词，请先在“提示词”页面创建。
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {prompts.map((prompt, index) => (
+                <Badge
+                  key={prompt.id}
+                  variant={index === 0 ? "secondary" : "outline"}
+                  className="rounded-full"
+                >
+                  {prompt.name}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
         <Card className="border-border/60 bg-white/70">
@@ -690,6 +828,8 @@ export default function CreatePage() {
                   const isRewriting =
                     status?.status === "loading" ||
                     (rewriteLoading && rewriteTarget === article.url);
+                  const promptValue =
+                    promptSelections[article.url] || defaultPromptId;
                   return (
                     <div
                       key={`${article.wx_id}-${article.short_link}`}
@@ -719,6 +859,42 @@ export default function CreatePage() {
                         <Badge variant="outline" className="rounded-full">
                           互动率 {(getEngagement(article) * 100).toFixed(1)}%
                         </Badge>
+                      </div>
+                      <div className="mt-3 space-y-1">
+                        <span className="text-xs text-muted-foreground">
+                          提示词
+                        </span>
+                        <Select
+                          value={promptValue}
+                          onValueChange={(value) =>
+                            handlePromptSelect(article.url, value)
+                          }
+                          disabled={
+                            promptsLoading ||
+                            prompts.length === 0 ||
+                            batchRewriting
+                          }
+                        >
+                          <SelectTrigger className="h-8">
+                            <SelectValue placeholder="选择提示词" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {prompts.length === 0 ? (
+                              <SelectItem value="none" disabled>
+                                暂无提示词
+                              </SelectItem>
+                            ) : (
+                              prompts.map((prompt) => (
+                                <SelectItem
+                                  key={prompt.id}
+                                  value={String(prompt.id)}
+                                >
+                                  {prompt.name}
+                                </SelectItem>
+                              ))
+                            )}
+                          </SelectContent>
+                        </Select>
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <Button

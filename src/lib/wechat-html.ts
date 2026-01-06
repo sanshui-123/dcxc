@@ -1,20 +1,20 @@
 const STYLE = {
   section:
-    "font-size:16px;line-height:1.9;color:#3f3f3f;letter-spacing:0.2px;",
-  p: "margin:12px 0;font-size:16px;line-height:1.9;color:#3f3f3f;",
-  h2: "margin:22px 0 12px;font-size:18px;line-height:1.6;font-weight:700;color:#2f7a5e;",
-  h3: "margin:18px 0 10px;font-size:16px;line-height:1.6;font-weight:700;color:#2f7a5e;",
-  ul: "margin:10px 0;padding-left:18px;color:#3f3f3f;font-size:16px;line-height:1.9;",
-  ol: "margin:10px 0;padding-left:18px;color:#3f3f3f;font-size:16px;line-height:1.9;",
-  li: "margin:6px 0;",
+    "padding:0 16px;font-size:17px;line-height:1.6;color:rgba(0,0,0,0.9);letter-spacing:0.5px;text-align:justify;font-family:\"PingFang SC\",system-ui,-apple-system,\"Helvetica Neue\",\"Hiragino Sans GB\",\"Microsoft YaHei\",Arial,sans-serif;background-color:#ffffff;",
+  p: "margin:0 0 12px;line-height:1.6;text-align:justify;",
+  h2: "margin:14px 0 8px;font-size:18px;line-height:1.6;font-weight:700;letter-spacing:2px;color:rgb(11,139,102);",
+  h3: "margin:12px 0 6px;font-size:17px;line-height:1.6;font-weight:700;letter-spacing:1px;color:rgb(11,139,102);",
+  ul: "margin:0 0 12px;padding-left:18px;line-height:1.6;",
+  ol: "margin:0 0 12px;padding-left:18px;line-height:1.6;",
+  li: "margin:4px 0;",
   blockquote:
-    "margin:12px 0;padding:10px 12px;background:#f7f7f7;border-left:3px solid #d9d9d9;color:#6a6a6a;font-size:15px;line-height:1.8;",
-  imgWrap: "margin:16px 0;text-align:center;",
-  img: "max-width:100%;height:auto;border-radius:10px;display:block;margin:0 auto;",
-  strong: "font-weight:700;color:#2b2b2b;",
+    "margin:0 0 12px;padding:10px 12px;background:#f5f5f5;border-left:3px solid #e0e0e0;color:#666666;font-size:16px;line-height:1.6;",
+  imgWrap: "margin:0 0 12px;text-align:center;",
+  img: "width:100%;height:auto;display:block;margin:0 auto;",
+  strong: "font-weight:700;color:rgb(51,51,51);",
   code:
     "background:#f3f3f3;border-radius:4px;padding:2px 4px;font-size:13px;font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace;",
-  link: "color:#2f7a5e;text-decoration:underline;",
+  link: "color:rgb(11,139,102);text-decoration:underline;",
 };
 
 function escapeHtml(value: string) {

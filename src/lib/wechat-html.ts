@@ -77,6 +77,11 @@ const STYLE = {
   headingText: "font-size: 18px;letter-spacing: 2px;color: rgb(11, 139, 102);",
   headingTextSmall:
     "font-size: 17px;letter-spacing: 1px;color: rgb(11, 139, 102);",
+  highlight:
+    "letter-spacing: 2px;color: rgb(171, 25, 66);font-weight: bold;",
+  transitionWrap: "margin: 20px 16px 18px;text-align: center;",
+  transitionBadge:
+    "display: inline-block;padding: 10px 24px;border-radius: 999px;border: 1px solid rgba(47, 122, 94, 0.2);background: rgba(47, 122, 94, 0.08);color: rgb(11, 139, 102);font-size: 32px;font-weight: 700;letter-spacing: 2px;",
   ul: "margin: 0px 16px 12px;padding-left: 18px;line-height: 1.6em;text-align: justify;",
   ol: "margin: 0px 16px 12px;padding-left: 18px;line-height: 1.6em;text-align: justify;",
   li: "margin: 4px 0px;",
@@ -129,6 +134,11 @@ function renderInline(text: string) {
 
   output = escapeHtml(output);
   output = output.replace(
+    /==([^=]+)==/g,
+    (_match, highlighted) =>
+      `<span style="${STYLE.highlight}">${highlighted}</span>`
+  );
+  output = output.replace(
     /\*\*([^*]+)\*\*/g,
     (_match, bold) =>
       `<strong style="${STYLE.strong}">${bold}</strong>`
@@ -169,6 +179,7 @@ export function formatWechatHtml(markdown: string) {
   const lines = markdown.split(/\r?\n/);
   const blocks: string[] = [];
   let paragraph: string[] = [];
+  let transitionIndex = 0;
 
   const flushParagraph = () => {
     if (paragraph.length === 0) return;
@@ -184,6 +195,26 @@ export function formatWechatHtml(markdown: string) {
 
     if (!line) {
       flushParagraph();
+      i += 1;
+      continue;
+    }
+
+    const transitionMatch = line.match(
+      /^\[\[TRANSITION(?::\s*(\d+))?\]\]$|^\{\{TRANSITION\}\}$|^---$/
+    );
+    if (transitionMatch) {
+      flushParagraph();
+      const explicit = transitionMatch[1]
+        ? Number.parseInt(transitionMatch[1], 10)
+        : NaN;
+      transitionIndex += 1;
+      const label = Number.isFinite(explicit)
+        ? explicit
+        : transitionIndex;
+      const text = `#${String(label).padStart(2, "0")}`;
+      blocks.push(
+        `<p style="${STYLE.transitionWrap}"><span style="${STYLE.transitionBadge}">${text}</span></p>`
+      );
       i += 1;
       continue;
     }

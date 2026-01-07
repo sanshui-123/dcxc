@@ -1,20 +1,67 @@
 const STYLE = {
-  section:
-    "font-size:17px;line-height:1.6;color:rgba(0,0,0,0.9);letter-spacing:0.544px;font-family:\"PingFang SC\",system-ui,-apple-system,\"Helvetica Neue\",\"Hiragino Sans GB\",\"Microsoft YaHei\",Arial,sans-serif;background-color:#ffffff;",
-  p: "margin:0 16px 12px;line-height:1.6;text-align:justify;",
-  h2: "margin:12px 16px 8px;font-size:18px;line-height:1.6;font-weight:700;letter-spacing:2px;color:rgb(11,139,102);",
-  h3: "margin:10px 16px 6px;font-size:17px;line-height:1.6;font-weight:700;letter-spacing:1px;color:rgb(11,139,102);",
-  ul: "margin:0 16px 12px;padding-left:18px;line-height:1.6;text-align:justify;",
-  ol: "margin:0 16px 12px;padding-left:18px;line-height:1.6;text-align:justify;",
-  li: "margin:4px 0;",
+  section: "margin:0;padding:0;background-color:#ffffff;",
+  p:
+    "-webkit-tap-highlight-color: rgba(0, 0, 0, 0);" +
+    "margin: 0px 16px 12px;" +
+    "padding: 0px;" +
+    "outline: 0px;" +
+    "max-width: 100%;" +
+    "clear: both;" +
+    "min-height: 1em;" +
+    "color: rgba(0, 0, 0, 0.9);" +
+    "font-family: \"PingFang SC\", system-ui, -apple-system, \"Helvetica Neue\", \"Hiragino Sans GB\", \"Microsoft YaHei UI\", \"Microsoft YaHei\", Arial, sans-serif;" +
+    "font-size: 17px;" +
+    "font-style: normal;" +
+    "font-variant-ligatures: normal;" +
+    "font-variant-caps: normal;" +
+    "font-weight: 400;" +
+    "letter-spacing: 0.544px;" +
+    "orphans: 2;" +
+    "text-align: justify;" +
+    "text-indent: 0px;" +
+    "text-transform: none;" +
+    "widows: 2;" +
+    "word-spacing: 0px;" +
+    "-webkit-text-stroke-width: 0px;" +
+    "white-space: normal;" +
+    "text-decoration-thickness: initial;" +
+    "text-decoration-style: initial;" +
+    "text-decoration-color: initial;" +
+    "background-color: rgb(255, 255, 255);" +
+    "visibility: visible;" +
+    "line-height: 1.6em;" +
+    "box-sizing: border-box !important;" +
+    "overflow-wrap: break-word !important;",
+  headingWrap:
+    "-webkit-tap-highlight-color: rgba(0, 0, 0, 0);" +
+    "margin: 0px 16px 12px;" +
+    "padding: 0px;" +
+    "outline: 0px;" +
+    "max-width: 100%;" +
+    "clear: both;" +
+    "min-height: 1em;" +
+    "font-weight: bold;" +
+    "caret-color: rgb(74, 74, 74);" +
+    "color: rgb(102, 102, 102);" +
+    "font-size: 16px;" +
+    "letter-spacing: 1px;" +
+    "background-color: rgb(255, 255, 255);" +
+    "box-sizing: border-box !important;" +
+    "overflow-wrap: break-word !important;",
+  headingText: "font-size: 18px;letter-spacing: 2px;color: rgb(11, 139, 102);",
+  headingTextSmall:
+    "font-size: 17px;letter-spacing: 1px;color: rgb(11, 139, 102);",
+  ul: "margin: 0px 16px 12px;padding-left: 18px;line-height: 1.6em;text-align: justify;",
+  ol: "margin: 0px 16px 12px;padding-left: 18px;line-height: 1.6em;text-align: justify;",
+  li: "margin: 4px 0px;",
   blockquote:
-    "margin:0 16px 12px;padding:10px 12px;background:#f5f5f5;border-left:3px solid #e0e0e0;color:#666666;font-size:16px;line-height:1.6;",
-  imgWrap: "margin:0 16px 12px;text-align:center;line-height:1.6;",
-  img: "width:100%;height:auto;display:block;margin:0 auto;",
-  strong: "font-weight:700;color:rgb(51,51,51);",
+    "margin: 0px 16px 12px;padding: 10px 12px;background: #f5f5f5;border-left: 3px solid #e0e0e0;color: #666666;font-size: 16px;line-height: 1.6em;",
+  imgWrap: "margin: 0px 16px 12px;line-height: 1.6em;text-align: justify;",
+  img: "width: 100%;height: auto;display: block;margin: 0 auto;",
+  strong: "font-weight: 700;color: rgb(51, 51, 51);",
   code:
-    "background:#f3f3f3;border-radius:4px;padding:2px 4px;font-size:13px;font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace;",
-  link: "color:rgb(11,139,102);text-decoration:underline;",
+    "background: #f3f3f3;border-radius: 4px;padding: 2px 4px;font-size: 13px;font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace;",
+  link: "color: rgb(11, 139, 102);text-decoration: underline;",
 };
 
 function escapeHtml(value: string) {
@@ -121,8 +168,9 @@ export function formatWechatHtml(markdown: string) {
 
     if (line.startsWith("## ")) {
       flushParagraph();
+      const text = renderInline(line.slice(3).trim());
       blocks.push(
-        `<h2 style="${STYLE.h2}">${renderInline(line.slice(3).trim())}</h2>`
+        `<p style="${STYLE.headingWrap}"><span style="${STYLE.headingText}">${text}</span></p>`
       );
       i += 1;
       continue;
@@ -130,8 +178,9 @@ export function formatWechatHtml(markdown: string) {
 
     if (line.startsWith("### ")) {
       flushParagraph();
+      const text = renderInline(line.slice(4).trim());
       blocks.push(
-        `<h3 style="${STYLE.h3}">${renderInline(line.slice(4).trim())}</h3>`
+        `<p style="${STYLE.headingWrap}"><span style="${STYLE.headingTextSmall}">${text}</span></p>`
       );
       i += 1;
       continue;
@@ -139,8 +188,9 @@ export function formatWechatHtml(markdown: string) {
 
     if (line.startsWith("# ")) {
       flushParagraph();
+      const text = renderInline(line.slice(2).trim());
       blocks.push(
-        `<h2 style="${STYLE.h2}">${renderInline(line.slice(2).trim())}</h2>`
+        `<p style="${STYLE.headingWrap}"><span style="${STYLE.headingText}">${text}</span></p>`
       );
       i += 1;
       continue;

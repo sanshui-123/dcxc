@@ -34,14 +34,14 @@ const STYLE = {
     "max-width: 100%;" +
     "clear: both;" +
     "min-height: 1em;" +
-    "color: rgba(0, 0, 0, 0.9);" +
-    "font-family: \"PingFang SC\", system-ui, -apple-system, \"Helvetica Neue\", \"Hiragino Sans GB\", \"Microsoft YaHei UI\", \"Microsoft YaHei\", Arial, sans-serif;" +
-    "font-size: 17px;" +
+    "color: rgb(102, 102, 102);" +
+    "font-family: Optima-Regular, PingFangTC-light;" +
+    "font-size: 16px;" +
     "font-style: normal;" +
     "font-variant-ligatures: normal;" +
     "font-variant-caps: normal;" +
     "font-weight: 400;" +
-    "letter-spacing: 0.544px;" +
+    "letter-spacing: 2px;" +
     "orphans: 2;" +
     "text-align: justify;" +
     "text-indent: 0px;" +

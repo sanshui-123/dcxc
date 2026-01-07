@@ -1,5 +1,31 @@
 const STYLE = {
   section: "margin:0;padding:0;background-color:#ffffff;",
+  textSpan:
+    "font-family: Optima-Regular, PingFangTC-light;" +
+    "-webkit-tap-highlight-color: rgba(0, 0, 0, 0);" +
+    "margin-right: 0px;" +
+    "margin-left: 0px;" +
+    "padding: 0px;" +
+    "outline: 0px;" +
+    "max-width: 100%;" +
+    "clear: both;" +
+    "min-height: 1em;" +
+    "font-variant-ligatures: normal;" +
+    "font-variant-caps: normal;" +
+    "orphans: 2;" +
+    "widows: 2;" +
+    "-webkit-text-stroke-width: 0px;" +
+    "text-decoration-thickness: initial;" +
+    "text-decoration-style: initial;" +
+    "text-decoration-color: initial;" +
+    "caret-color: rgb(74, 74, 74);" +
+    "color: rgb(102, 102, 102);" +
+    "font-size: 16px;" +
+    "background-color: rgb(255, 255, 255);" +
+    "letter-spacing: 2px;" +
+    "visibility: visible;" +
+    "box-sizing: border-box !important;" +
+    "overflow-wrap: break-word !important;",
   p:
     "-webkit-tap-highlight-color: rgba(0, 0, 0, 0);" +
     "margin: 0px 16px 12px;" +
@@ -122,13 +148,15 @@ function renderInline(text: string) {
 function renderParagraph(lines: string[]) {
   const content = lines.join(" ").trim();
   if (!content) return "";
-  return `<p style="${STYLE.p}">${renderInline(content)}</p>`;
+  return `<p style="${STYLE.p}"><span style="${STYLE.textSpan}">${renderInline(
+    content
+  )}</span></p>`;
 }
 
 function renderImage(alt: string, url: string) {
   const safeAlt = escapeAttribute(alt);
   const safeUrl = escapeAttribute(url);
-  return `<p style="${STYLE.imgWrap}"><img src="${safeUrl}" alt="${safeAlt}" style="${STYLE.img}" /></p>`;
+  return `<p style="${STYLE.imgWrap}"><span><img src="${safeUrl}" alt="${safeAlt}" style="${STYLE.img}" /></span></p>`;
 }
 
 function parseImageLine(line: string) {
@@ -216,7 +244,9 @@ export function formatWechatHtml(markdown: string) {
       }
       const quoteText = renderInline(quoteLines.join(" ").trim());
       if (quoteText) {
-        blocks.push(`<blockquote style="${STYLE.blockquote}">${quoteText}</blockquote>`);
+        blocks.push(
+          `<blockquote style="${STYLE.blockquote}"><span style="${STYLE.textSpan}">${quoteText}</span></blockquote>`
+        );
       }
       continue;
     }
@@ -226,7 +256,11 @@ export function formatWechatHtml(markdown: string) {
       const items: string[] = [];
       while (i < lines.length && /^[-*]\s+/.test(lines[i].trim())) {
         const itemText = lines[i].trim().replace(/^[-*]\s+/, "");
-        items.push(`<li style="${STYLE.li}">${renderInline(itemText)}</li>`);
+        items.push(
+          `<li style="${STYLE.li}"><span style="${STYLE.textSpan}">${renderInline(
+            itemText
+          )}</span></li>`
+        );
         i += 1;
       }
       blocks.push(`<ul style="${STYLE.ul}">${items.join("")}</ul>`);
@@ -238,7 +272,11 @@ export function formatWechatHtml(markdown: string) {
       const items: string[] = [];
       while (i < lines.length && /^\d+\.\s+/.test(lines[i].trim())) {
         const itemText = lines[i].trim().replace(/^\d+\.\s+/, "");
-        items.push(`<li style="${STYLE.li}">${renderInline(itemText)}</li>`);
+        items.push(
+          `<li style="${STYLE.li}"><span style="${STYLE.textSpan}">${renderInline(
+            itemText
+          )}</span></li>`
+        );
         i += 1;
       }
       blocks.push(`<ol style="${STYLE.ol}">${items.join("")}</ol>`);

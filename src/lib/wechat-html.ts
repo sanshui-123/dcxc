@@ -130,6 +130,43 @@ function escapeHtml(value: string) {
     .replace(/'/g, "&#39;");
 }
 
+const PUNCTUATION_MAP: Record<string, string> = {
+  "，": ",",
+  "。": ".",
+  "！": "!",
+  "？": "?",
+  "；": ";",
+  "：": ":",
+  "、": ",",
+  "“": "\"",
+  "”": "\"",
+  "‘": "'",
+  "’": "'",
+  "（": "(",
+  "）": ")",
+  "【": "[",
+  "】": "]",
+  "《": "<",
+  "》": ">",
+  "〈": "<",
+  "〉": ">",
+  "～": "~",
+  "—": "-",
+  "…": "...",
+  "·": ".",
+  "￥": "¥",
+};
+
+function normalizeTextContent(text: string) {
+  if (!text) return text;
+  let output = text;
+  output = output.replace(/[，。！？；：、“”‘’（）【】《》〈〉～—…·￥、]/g, (match) => {
+    return PUNCTUATION_MAP[match] ?? match;
+  });
+  output = output.replace(/[ \t\u00a0]+/g, "");
+  return output;
+}
+
 function escapeAttribute(value: string) {
   return value.replace(/&/g, "&amp;").replace(/\"/g, "&quot;");
 }
@@ -158,6 +195,7 @@ function renderInline(text: string) {
       )
   );
 
+  output = normalizeTextContent(output);
   output = escapeHtml(output);
   output = output.replace(
     /==([^=]+)==/g,

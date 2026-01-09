@@ -26,15 +26,41 @@ const STYLE = {
     "visibility: visible;" +
     "box-sizing: border-box !important;" +
     "overflow-wrap: break-word !important;",
-  p:
+  secondarySpan:
+    "font-family: Optima-Regular, PingFangTC-light;" +
     "-webkit-tap-highlight-color: rgba(0, 0, 0, 0);" +
-    "margin: 0px 16px 12px;" +
+    "margin-right: 0px;" +
+    "margin-left: 0px;" +
     "padding: 0px;" +
     "outline: 0px;" +
     "max-width: 100%;" +
     "clear: both;" +
     "min-height: 1em;" +
-    "color: rgb(102, 102, 102);" +
+    "font-variant-ligatures: normal;" +
+    "font-variant-caps: normal;" +
+    "orphans: 2;" +
+    "widows: 2;" +
+    "-webkit-text-stroke-width: 0px;" +
+    "text-decoration-thickness: initial;" +
+    "text-decoration-style: initial;" +
+    "text-decoration-color: initial;" +
+    "caret-color: rgb(74, 74, 74);" +
+    "color: rgb(140, 140, 140);" +
+    "font-size: 15px;" +
+    "background-color: rgb(255, 255, 255);" +
+    "letter-spacing: 1.5px;" +
+    "visibility: visible;" +
+    "box-sizing: border-box !important;" +
+    "overflow-wrap: break-word !important;",
+  p:
+    "-webkit-tap-highlight-color: rgba(0, 0, 0, 0);" +
+    "margin: 0px 16px 16px;" +
+    "padding: 0px;" +
+    "outline: 0px;" +
+    "max-width: 100%;" +
+    "clear: both;" +
+    "min-height: 1em;" +
+    "color: rgb(34, 34, 34);" +
     "font-family: Optima-Regular, PingFangTC-light;" +
     "font-size: 16px;" +
     "font-style: normal;" +
@@ -79,7 +105,7 @@ const STYLE = {
     "font-size: 17px;letter-spacing: 1px;color: rgb(11, 139, 102);",
   highlight:
     "letter-spacing: 2px;color: rgb(171, 25, 66);font-weight: bold;",
-  transitionWrap: "margin: 20px 16px 18px;text-align: center;",
+  transitionWrap: "margin: 24px 16px 22px;text-align: center;",
   transitionBadge:
     "display: inline-block;padding: 10px 24px;border-radius: 999px;border: 1px solid rgba(47, 122, 94, 0.2);background: rgba(47, 122, 94, 0.08);color: rgb(11, 139, 102);font-size: 32px;font-weight: 700;letter-spacing: 2px;",
   ul: "margin: 0px 16px 12px;padding-left: 18px;line-height: 1.6em;text-align: justify;",
@@ -155,12 +181,110 @@ function renderInline(text: string) {
   return output;
 }
 
+function splitByDelimiters(text: string, delimiters: string[]) {
+  const segments: string[] = [];
+  let buffer = "";
+  for (const char of text) {
+    buffer += char;
+    if (delimiters.includes(char)) {
+      if (buffer.trim()) segments.push(buffer.trim());
+      buffer = "";
+    }
+  }
+  if (buffer.trim()) segments.push(buffer.trim());
+  return segments;
+}
+
+function countPlainChars(value: string) {
+  return value.replace(/\s+/g, "").length;
+}
+
+function splitParagraphContent(content: string) {
+  const normalized = content.replace(/\s+/g, " ").trim();
+  const maxChars = 60;
+  if (countPlainChars(normalized) <= maxChars) return [normalized];
+
+  const sentences = splitByDelimiters(normalized, [
+    "。",
+    "！",
+    "？",
+    "!",
+    "?",
+    "；",
+    ";",
+  ]);
+
+  const grouped: string[] = [];
+  let current = "";
+  for (const sentence of sentences) {
+    const candidate = current ? `${current}${sentence}` : sentence;
+    if (current && countPlainChars(candidate) > maxChars) {
+      grouped.push(current.trim());
+      current = sentence;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current.trim()) grouped.push(current.trim());
+
+  const finalSegments: string[] = [];
+  for (const segment of grouped) {
+    if (countPlainChars(segment) <= maxChars * 1.4) {
+      finalSegments.push(segment.trim());
+      continue;
+    }
+    const commas = splitByDelimiters(segment, ["，", ","]);
+    for (const chunk of commas) {
+      if (chunk.trim()) finalSegments.push(chunk.trim());
+    }
+  }
+
+  return finalSegments.length > 0 ? finalSegments : [normalized];
+}
+
+function isSecondaryParagraph(content: string) {
+  const trimmed = content.trim();
+  if (!trimmed) return false;
+  const prefixes = [
+    "注：",
+    "备注：",
+    "说明：",
+    "提示：",
+    "小提示：",
+    "小贴士：",
+    "来源：",
+    "参考：",
+    "数据：",
+    "图：",
+    "图注：",
+    "图片：",
+    "图片说明：",
+    "引用：",
+    "附：",
+  ];
+  if (prefixes.some((prefix) => trimmed.startsWith(prefix))) return true;
+  if (trimmed.startsWith("（") && trimmed.endsWith("）") && trimmed.length < 90) {
+    return true;
+  }
+  if (trimmed.startsWith("(") && trimmed.endsWith(")") && trimmed.length < 90) {
+    return true;
+  }
+  return false;
+}
+
 function renderParagraph(lines: string[]) {
   const content = lines.join(" ").trim();
-  if (!content) return "";
-  return `<p style="${STYLE.p}"><span style="${STYLE.textSpan}">${renderInline(
-    content
-  )}</span></p>`;
+  if (!content) return [];
+  const segments = splitParagraphContent(content);
+  const spanStyle = isSecondaryParagraph(content)
+    ? STYLE.secondarySpan
+    : STYLE.textSpan;
+  return segments.map(
+    (segment) =>
+      `<p style="${STYLE.p}"><span style="${spanStyle}">${renderInline(
+        segment
+      )}</span></p>`
+  );
 }
 
 function renderImage(alt: string, url: string) {
@@ -184,7 +308,9 @@ export function formatWechatHtml(markdown: string) {
   const flushParagraph = () => {
     if (paragraph.length === 0) return;
     const rendered = renderParagraph(paragraph);
-    if (rendered) blocks.push(rendered);
+    for (const block of rendered) {
+      blocks.push(block);
+    }
     paragraph = [];
   };
 

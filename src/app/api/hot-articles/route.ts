@@ -82,7 +82,7 @@ export async function GET(req: Request) {
   try {
     const records = await prisma.hotArticle.findMany({
       where: { category },
-      orderBy: { createdAt: "desc" },
+      orderBy: { updatedAt: "desc" },
       take: limit,
     });
     const items = records.map((record) =>
@@ -239,7 +239,17 @@ export async function POST(req: Request) {
       );
     }
 
-    return NextResponse.json({ ok: true, data: items });
+    return NextResponse.json({
+      ok: true,
+      data: items,
+      meta: {
+        page,
+        total: data.total,
+        totalPage: data.total_page,
+        cost: data.cost,
+        remain: data.remain_money,
+      },
+    });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "无法连接上游接口。";

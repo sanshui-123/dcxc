@@ -59,7 +59,17 @@ type PromptsApiResponse =
   | { ok: false; error: string };
 
 type HotArticlesApiResponse =
-  | { ok: true; data: HotArticleItem[] }
+  | {
+      ok: true;
+      data: HotArticleItem[];
+      meta?: {
+        page?: number;
+        total?: number;
+        totalPage?: number;
+        cost?: number;
+        remain?: number;
+      };
+    }
   | { ok: false; error: string };
 
 type PromptItem = {
@@ -129,6 +139,7 @@ type RewriteStatus = {
 
 const STORAGE_KEY = "create-articles-cache-v1";
 const DRAFTS_KEY = "publish-items-v1";
+const HOT_PAGE_KEY = "hot-articles-page-v1";
 
 function formatCompact(value: number) {
   if (!Number.isFinite(value)) return "--";
@@ -298,6 +309,7 @@ export default function CreatePage() {
     useState<ArticleSource>("keyword");
   const [keywordArticles, setKeywordArticles] = useState<CreateArticle[]>([]);
   const [hotArticles, setHotArticles] = useState<CreateArticle[]>([]);
+  const [hotPage, setHotPage] = useState(1);
   const [articleCache, setArticleCache] = useState<
     Record<string, DajialaArticleHtmlData>
   >({});
@@ -345,6 +357,7 @@ export default function CreatePage() {
         activeSource?: ArticleSource;
         articleCache?: Record<string, DajialaArticleHtmlData>;
         activeUrl?: string;
+        hotPage?: number;
       };
       setKeyword(parsed.keyword ?? "");
       const storedKeyword =
@@ -355,6 +368,9 @@ export default function CreatePage() {
       const source =
         parsed.activeSource === "hot" ? "hot" : "keyword";
       setActiveSource(source);
+      if (typeof parsed.hotPage === "number" && parsed.hotPage > 0) {
+        setHotPage(parsed.hotPage);
+      }
       if (source === "keyword" && parsed.activeUrl && storedKeyword) {
         const matched = storedKeyword.find(
           (item) => item.url === parsed.activeUrl
@@ -370,15 +386,24 @@ export default function CreatePage() {
   }, []);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const storedPage = Number(localStorage.getItem(HOT_PAGE_KEY));
+    if (Number.isFinite(storedPage) && storedPage > 0) {
+      setHotPage(storedPage);
+    }
+  }, []);
+
+  useEffect(() => {
     const payload = {
       keyword,
       keywordArticles,
       articleCache,
       activeUrl: activeArticle?.url ?? "",
       activeSource,
+      hotPage,
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-  }, [keyword, keywordArticles, articleCache, activeArticle, activeSource]);
+  }, [keyword, keywordArticles, articleCache, activeArticle, activeSource, hotPage]);
 
   useEffect(() => {
     if (!saveMessage) return;
@@ -575,6 +600,7 @@ export default function CreatePage() {
   const fetchHotArticles = async () => {
     setHotLoading(true);
     setHotError(null);
+    const page = Number.isFinite(hotPage) && hotPage > 0 ? hotPage : 1;
     try {
       const res = await fetch("/api/hot-articles", {
         method: "POST",
@@ -582,6 +608,7 @@ export default function CreatePage() {
         body: JSON.stringify({
           category: 17,
           limit: 5,
+          page,
         }),
       });
       const parsed = await readApiJson<HotArticlesApiResponse>(
@@ -599,6 +626,13 @@ export default function CreatePage() {
       }
       const items = data.data.map(toHotArticle);
       setHotArticles(items);
+      const totalPage =
+        typeof data.meta?.totalPage === "number" && data.meta.totalPage > 0
+          ? data.meta.totalPage
+          : undefined;
+      const nextPage = totalPage ? (page >= totalPage ? 1 : page + 1) : page + 1;
+      setHotPage(nextPage);
+      localStorage.setItem(HOT_PAGE_KEY, String(nextPage));
       setActiveSource("hot");
     } catch (err) {
       const message = err instanceof Error ? err.message : "获取爆文失败";
@@ -984,7 +1018,7 @@ export default function CreatePage() {
                   </Button>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  默认抓取 5 篇，分类：健康。
+                  默认抓取 5 篇，分类：健康。每次抓取自动换一页。
                 </p>
                 {hotError ? (
                   <p className="text-xs text-rose-600">{hotError}</p>

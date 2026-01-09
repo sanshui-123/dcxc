@@ -140,6 +140,7 @@ type RewriteStatus = {
 const STORAGE_KEY = "create-articles-cache-v1";
 const DRAFTS_KEY = "publish-items-v1";
 const HOT_PAGE_KEY = "hot-articles-page-v1";
+const HOT_SEEN_KEY = "hot-articles-seen-v1";
 
 function formatCompact(value: number) {
   if (!Number.isFinite(value)) return "--";
@@ -257,6 +258,22 @@ function saveDrafts(list: DraftItem[]) {
   localStorage.setItem(DRAFTS_KEY, JSON.stringify(list));
 }
 
+function loadHotSeen(): string[] {
+  if (typeof window === "undefined") return [];
+  const cached = localStorage.getItem(HOT_SEEN_KEY);
+  if (!cached) return [];
+  try {
+    const parsed = JSON.parse(cached) as string[];
+    return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHotSeen(urls: string[]) {
+  localStorage.setItem(HOT_SEEN_KEY, JSON.stringify(urls));
+}
+
 function upsertDraft(item: DraftItem) {
   const list = loadDrafts();
   const sourceUrl = item.sourceUrl?.trim();
@@ -310,6 +327,8 @@ export default function CreatePage() {
   const [keywordArticles, setKeywordArticles] = useState<CreateArticle[]>([]);
   const [hotArticles, setHotArticles] = useState<CreateArticle[]>([]);
   const [hotPage, setHotPage] = useState(1);
+  const [hotSeenCount, setHotSeenCount] = useState(0);
+  const [hotMessage, setHotMessage] = useState<string | null>(null);
   const [articleCache, setArticleCache] = useState<
     Record<string, DajialaArticleHtmlData>
   >({});
@@ -391,6 +410,8 @@ export default function CreatePage() {
     if (Number.isFinite(storedPage) && storedPage > 0) {
       setHotPage(storedPage);
     }
+    const seen = loadHotSeen();
+    setHotSeenCount(seen.length);
   }, []);
 
   useEffect(() => {
@@ -474,6 +495,17 @@ export default function CreatePage() {
         }
         const items = data.data.map(toHotArticle);
         setHotArticles(items);
+        const seen = new Set(loadHotSeen());
+        let updated = false;
+        for (const item of items) {
+          if (!item.url || seen.has(item.url)) continue;
+          seen.add(item.url);
+          updated = true;
+        }
+        if (updated) {
+          saveHotSeen(Array.from(seen));
+          setHotSeenCount(seen.size);
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : "获取爆文失败";
         setHotError(message);
@@ -600,39 +632,72 @@ export default function CreatePage() {
   const fetchHotArticles = async () => {
     setHotLoading(true);
     setHotError(null);
-    const page = Number.isFinite(hotPage) && hotPage > 0 ? hotPage : 1;
+    setHotMessage(null);
+    const limit = 5;
+    const seen = new Set(loadHotSeen());
+    const collected: CreateArticle[] = [];
+    let page = Number.isFinite(hotPage) && hotPage > 0 ? hotPage : 1;
+    let attempts = 0;
+    let lastTotalPage: number | undefined;
     try {
-      const res = await fetch("/api/hot-articles", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          category: 17,
-          limit: 5,
-          page,
-        }),
-      });
-      const parsed = await readApiJson<HotArticlesApiResponse>(
-        res,
-        "爆文接口"
-      );
-      if (!parsed.ok) {
-        setHotError(parsed.error);
+      while (collected.length < limit && attempts < 5) {
+        const res = await fetch("/api/hot-articles", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            category: 17,
+            limit,
+            page,
+          }),
+        });
+        const parsed = await readApiJson<HotArticlesApiResponse>(
+          res,
+          "爆文接口"
+        );
+        if (!parsed.ok) {
+          throw new Error(parsed.error);
+        }
+        const data = parsed.data;
+        if (!res.ok || !data.ok) {
+          throw new Error(!data.ok ? data.error : "获取爆文失败。");
+        }
+
+        const items = data.data.map(toHotArticle);
+        for (const item of items) {
+          if (!item.url || seen.has(item.url)) continue;
+          collected.push(item);
+          seen.add(item.url);
+          if (collected.length >= limit) break;
+        }
+
+        lastTotalPage =
+          typeof data.meta?.totalPage === "number" && data.meta.totalPage > 0
+            ? data.meta.totalPage
+            : lastTotalPage;
+        const nextPage = lastTotalPage
+          ? page >= lastTotalPage
+            ? 1
+            : page + 1
+          : page + 1;
+        page = nextPage;
+        attempts += 1;
+      }
+
+      if (collected.length === 0) {
+        setHotError("暂无新内容，可稍后再试。");
         return;
       }
-      const data = parsed.data;
-      if (!res.ok || !data.ok) {
-        setHotError(!data.ok ? data.error : "获取爆文失败。");
-        return;
+
+      setHotArticles(collected);
+      setHotSeenCount(seen.size);
+      saveHotSeen(Array.from(seen));
+      setHotPage(page);
+      localStorage.setItem(HOT_PAGE_KEY, String(page));
+      if (collected.length < limit) {
+        setHotMessage("当前可用新内容不足，已尽量去重展示。");
+      } else {
+        setHotMessage("已自动跳过重复内容。");
       }
-      const items = data.data.map(toHotArticle);
-      setHotArticles(items);
-      const totalPage =
-        typeof data.meta?.totalPage === "number" && data.meta.totalPage > 0
-          ? data.meta.totalPage
-          : undefined;
-      const nextPage = totalPage ? (page >= totalPage ? 1 : page + 1) : page + 1;
-      setHotPage(nextPage);
-      localStorage.setItem(HOT_PAGE_KEY, String(nextPage));
       setActiveSource("hot");
     } catch (err) {
       const message = err instanceof Error ? err.message : "获取爆文失败";
@@ -1020,6 +1085,12 @@ export default function CreatePage() {
                 <p className="text-xs text-muted-foreground">
                   默认抓取 5 篇，分类：健康。每次抓取自动换一页。
                 </p>
+                <p className="text-xs text-muted-foreground">
+                  已记录 {hotSeenCount} 篇，重复内容会被自动跳过。
+                </p>
+                {hotMessage ? (
+                  <p className="text-xs text-emerald-600">{hotMessage}</p>
+                ) : null}
                 {hotError ? (
                   <p className="text-xs text-rose-600">{hotError}</p>
                 ) : null}

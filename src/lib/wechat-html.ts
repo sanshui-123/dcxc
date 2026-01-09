@@ -290,6 +290,12 @@ function isSecondaryParagraph(content: string) {
   if (trimmed.startsWith("(") && trimmed.endsWith(")") && trimmed.length < 90) {
     return true;
   }
+  if (
+    trimmed.length < 80 &&
+    /(来源|引用|参考|图注|图片说明|数据来源|数据|样本|注释)/.test(trimmed)
+  ) {
+    return true;
+  }
   return false;
 }
 
@@ -311,9 +317,27 @@ function isHighlightParagraph(content: string) {
     "禁忌",
     "风险",
     "避坑",
+    "误区",
+    "必须",
+    "不要",
+    "切记",
+    "慎用",
+    "限时",
+    "立省",
   ];
-  if (keywords.some((keyword) => trimmed.startsWith(keyword))) return true;
-  if (/^【[^】]+】/.test(trimmed) && countPlainChars(trimmed) <= 60) return true;
+  const length = countPlainChars(trimmed);
+  const hasKeyword = keywords.some((keyword) => trimmed.includes(keyword));
+  const hasColon = trimmed.includes("：") || trimmed.includes(":");
+  const hasBracket = /^【[^】]+】/.test(trimmed);
+  const hasShortExclaim = length <= 36 && /[！!?]$/.test(trimmed);
+  const hasNumbers =
+    /\d/.test(trimmed) &&
+    /(元|天|次|斤|克|岁|周|月|%|折)/.test(trimmed) &&
+    length <= 40;
+
+  if ((hasKeyword || hasColon || hasBracket) && length <= 60) return true;
+  if (hasShortExclaim) return true;
+  if (hasNumbers) return true;
   return false;
 }
 
@@ -321,18 +345,16 @@ function renderParagraph(lines: string[]) {
   const content = lines.join(" ").trim();
   if (!content) return [];
   const segments = splitParagraphContent(content);
-  return segments.map(
-    (segment) => {
-      const spanStyle = isSecondaryParagraph(segment)
+  return segments.map((segment) => {
+    const spanStyle = isHighlightParagraph(segment)
+      ? STYLE.highlight
+      : isSecondaryParagraph(segment)
         ? STYLE.secondarySpan
-        : isHighlightParagraph(segment)
-          ? STYLE.highlight
-          : STYLE.textSpan;
-      return `<p style="${STYLE.p}"><span style="${spanStyle}">${renderInline(
-        segment
-      )}</span></p>`;
-    }
-  );
+        : STYLE.textSpan;
+    return `<p style="${STYLE.p}"><span style="${spanStyle}">${renderInline(
+      segment
+    )}</span></p>`;
+  });
 }
 
 function renderImage(alt: string, url: string) {

@@ -19,7 +19,7 @@ const STYLE = {
     "text-decoration-style: initial;" +
     "text-decoration-color: initial;" +
     "caret-color: rgb(74, 74, 74);" +
-    "color: rgb(102, 102, 102);" +
+    "color: rgb(34, 34, 34);" +
     "font-size: 16px;" +
     "background-color: rgb(255, 255, 255);" +
     "letter-spacing: 2px;" +
@@ -45,7 +45,7 @@ const STYLE = {
     "text-decoration-style: initial;" +
     "text-decoration-color: initial;" +
     "caret-color: rgb(74, 74, 74);" +
-    "color: rgb(140, 140, 140);" +
+    "color: rgb(150, 150, 150);" +
     "font-size: 15px;" +
     "background-color: rgb(255, 255, 255);" +
     "letter-spacing: 1.5px;" +
@@ -54,7 +54,7 @@ const STYLE = {
     "overflow-wrap: break-word !important;",
   p:
     "-webkit-tap-highlight-color: rgba(0, 0, 0, 0);" +
-    "margin: 0px 16px 16px;" +
+    "margin: 0px 16px 20px;" +
     "padding: 0px;" +
     "outline: 0px;" +
     "max-width: 100%;" +
@@ -199,9 +199,23 @@ function countPlainChars(value: string) {
   return value.replace(/\s+/g, "").length;
 }
 
+function hardSplitByLength(text: string, maxChars: number) {
+  const segments: string[] = [];
+  let buffer = "";
+  for (const char of text) {
+    buffer += char;
+    if (countPlainChars(buffer) >= maxChars) {
+      segments.push(buffer.trim());
+      buffer = "";
+    }
+  }
+  if (buffer.trim()) segments.push(buffer.trim());
+  return segments;
+}
+
 function splitParagraphContent(content: string) {
   const normalized = content.replace(/\s+/g, " ").trim();
-  const maxChars = 60;
+  const maxChars = 48;
   if (countPlainChars(normalized) <= maxChars) return [normalized];
 
   const sentences = splitByDelimiters(normalized, [
@@ -229,13 +243,18 @@ function splitParagraphContent(content: string) {
 
   const finalSegments: string[] = [];
   for (const segment of grouped) {
-    if (countPlainChars(segment) <= maxChars * 1.4) {
+    if (countPlainChars(segment) <= maxChars * 1.2) {
       finalSegments.push(segment.trim());
       continue;
     }
     const commas = splitByDelimiters(segment, ["，", ","]);
     for (const chunk of commas) {
-      if (chunk.trim()) finalSegments.push(chunk.trim());
+      if (!chunk.trim()) continue;
+      if (countPlainChars(chunk) > maxChars * 1.2) {
+        finalSegments.push(...hardSplitByLength(chunk.trim(), maxChars));
+      } else {
+        finalSegments.push(chunk.trim());
+      }
     }
   }
 
@@ -261,6 +280,8 @@ function isSecondaryParagraph(content: string) {
     "图片说明：",
     "引用：",
     "附：",
+    "数据来源：",
+    "引用数据：",
   ];
   if (prefixes.some((prefix) => trimmed.startsWith(prefix))) return true;
   if (trimmed.startsWith("（") && trimmed.endsWith("）") && trimmed.length < 90) {
@@ -272,18 +293,45 @@ function isSecondaryParagraph(content: string) {
   return false;
 }
 
+function isHighlightParagraph(content: string) {
+  const trimmed = content.trim();
+  if (!trimmed) return false;
+  const keywords = [
+    "今日福利",
+    "福利",
+    "重点",
+    "提醒",
+    "注意",
+    "结论",
+    "核心",
+    "关键",
+    "划重点",
+    "总结",
+    "建议",
+    "禁忌",
+    "风险",
+    "避坑",
+  ];
+  if (keywords.some((keyword) => trimmed.startsWith(keyword))) return true;
+  if (/^【[^】]+】/.test(trimmed) && countPlainChars(trimmed) <= 60) return true;
+  return false;
+}
+
 function renderParagraph(lines: string[]) {
   const content = lines.join(" ").trim();
   if (!content) return [];
   const segments = splitParagraphContent(content);
-  const spanStyle = isSecondaryParagraph(content)
-    ? STYLE.secondarySpan
-    : STYLE.textSpan;
   return segments.map(
-    (segment) =>
-      `<p style="${STYLE.p}"><span style="${spanStyle}">${renderInline(
+    (segment) => {
+      const spanStyle = isSecondaryParagraph(segment)
+        ? STYLE.secondarySpan
+        : isHighlightParagraph(segment)
+          ? STYLE.highlight
+          : STYLE.textSpan;
+      return `<p style="${STYLE.p}"><span style="${spanStyle}">${renderInline(
         segment
-      )}</span></p>`
+      )}</span></p>`;
+    }
   );
 }
 

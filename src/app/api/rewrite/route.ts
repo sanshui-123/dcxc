@@ -6,6 +6,7 @@ import { DEFAULT_PROMPT_TEMPLATE, buildPromptTemplate } from "@/lib/prompts";
 const DEFAULT_MODEL = "glm-4.7";
 const DEFAULT_BASE_URL =
   "https://open.bigmodel.cn/api/paas/v4/chat/completions";
+const FALLBACK_MODEL = "glm-4.6";
 
 const IMAGE_POOL = [
   "https://images.unsplash.com/photo-1501004318641-b39e6451bec6?auto=format&fit=crop&w=1200&q=80",
@@ -13,6 +14,84 @@ const IMAGE_POOL = [
   "https://images.unsplash.com/photo-1506126613408-eca07ce68773?auto=format&fit=crop&w=1200&q=80",
   "https://images.unsplash.com/photo-1501785888041-af3ef285b470?auto=format&fit=crop&w=1200&q=80",
 ];
+
+type CompletionRequest = {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  messages: Array<{ role: string; content: string }>;
+  temperature: number;
+};
+
+type CompletionResult =
+  | { ok: true; content: string }
+  | { ok: false; error: string };
+
+async function fetchCompletion({
+  baseUrl,
+  apiKey,
+  model,
+  messages,
+  temperature,
+}: CompletionRequest): Promise<CompletionResult> {
+  const res = await fetch(baseUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      messages,
+      temperature,
+    }),
+  });
+
+  if (!res.ok) {
+    return { ok: false, error: `${model} 接口失败: ${res.status}` };
+  }
+
+  const parsed = await readJson<{
+    choices?: Array<{ message?: { content?: string } }>;
+  }>(res);
+  if (!parsed.ok) {
+    console.warn(`${model} 返回非 JSON`, {
+      status: res.status,
+      snippet: parsed.text.slice(0, 120),
+    });
+    return { ok: false, error: `${model} 返回非 JSON 响应。` };
+  }
+
+  const content = parsed.data.choices?.[0]?.message?.content?.trim() || "";
+  if (!content) {
+    return { ok: false, error: `${model} 未返回内容。` };
+  }
+
+  return { ok: true, content };
+}
+
+async function requestCompletionWithFallback(
+  request: CompletionRequest,
+  fallbackModel?: string
+) {
+  const primary = await fetchCompletion(request);
+  if (primary.ok) {
+    return { content: primary.content, model: request.model };
+  }
+
+  if (fallbackModel && fallbackModel !== request.model) {
+    const fallback = await fetchCompletion({
+      ...request,
+      model: fallbackModel,
+    });
+    if (fallback.ok) {
+      return { content: fallback.content, model: fallbackModel };
+    }
+    throw new Error(fallback.error);
+  }
+
+  throw new Error(primary.error);
+}
 
 function getTextLength(markdown: string) {
   return markdown
@@ -166,6 +245,7 @@ async function rewriteTitle({
   baseUrl,
   apiKey,
   model,
+  fallbackModel,
   systemPrompt,
   sourceTitle,
   topic,
@@ -174,6 +254,7 @@ async function rewriteTitle({
   baseUrl: string;
   apiKey: string;
   model: string;
+  fallbackModel?: string;
   systemPrompt: string;
   sourceTitle: string;
   topic: string;
@@ -192,28 +273,24 @@ async function rewriteTitle({
 正文摘要：${summary || "无"}
 `;
 
-  const res = await fetch(baseUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: titlePrompt },
-      ],
-      temperature: 0.4,
-    }),
-  });
-
-  if (!res.ok) return "";
-  const parsed = await readJson<{
-    choices?: Array<{ message?: { content?: string } }>;
-  }>(res);
-  if (!parsed.ok) return "";
-  return parsed.data.choices?.[0]?.message?.content?.trim() || "";
+  try {
+    const result = await requestCompletionWithFallback(
+      {
+        baseUrl,
+        apiKey,
+        model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: titlePrompt },
+        ],
+        temperature: 0.4,
+      },
+      fallbackModel
+    );
+    return result.content.trim();
+  } catch {
+    return "";
+  }
 }
 
 async function resolvePromptTemplate(promptId?: number) {
@@ -269,6 +346,7 @@ export async function POST(req: Request) {
   }
 
   const model = process.env.GLM_MODEL || DEFAULT_MODEL;
+  const fallbackModel = model === FALLBACK_MODEL ? undefined : FALLBACK_MODEL;
   const baseUrl = process.env.GLM_API_BASE || DEFAULT_BASE_URL;
 
   const systemPrompt =
@@ -284,53 +362,21 @@ export async function POST(req: Request) {
   });
 
   try {
-    const res = await fetch(baseUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
+    const rewriteResult = await requestCompletionWithFallback(
+      {
+        baseUrl,
+        apiKey,
         model,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
         temperature: 0.7,
-      }),
-    });
+      },
+      fallbackModel
+    );
 
-    if (!res.ok) {
-      return NextResponse.json(
-        { ok: false, error: `改写接口失败: ${res.status}` },
-        { status: 502 }
-      );
-    }
-
-    const parsed = await readJson<{
-      choices?: Array<{ message?: { content?: string } }>;
-    }>(res);
-    if (!parsed.ok) {
-      console.warn("GLM 返回非 JSON", {
-        status: res.status,
-        snippet: parsed.text.slice(0, 120),
-      });
-      return NextResponse.json(
-        { ok: false, error: "改写接口返回非 JSON 响应。" },
-        { status: 502 }
-      );
-    }
-
-    const data = parsed.data;
-
-    const content = data.choices?.[0]?.message?.content?.trim() || "";
-    if (!content) {
-      return NextResponse.json(
-        { ok: false, error: "未获取到改写结果。" },
-        { status: 502 }
-      );
-    }
-
+    const content = rewriteResult.content.trim();
     const parsedContent = tryParseJSON(content);
     let draftTitle = clampTitle(
       parsedContent?.title?.trim() || title || "未命名文章"
@@ -340,38 +386,25 @@ export async function POST(req: Request) {
 
     if (getTextLength(draftMarkdown) < 1000) {
       const expandPrompt = `请将下面的公众号文章在不新增事实的前提下扩写到 1000 字以上，保持原有结构和语气，输出 Markdown 正文即可（不需要 # 标题），不要输出 JSON：\n\n${draftMarkdown}\n`;
-      const expandRes = await fetch(baseUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: expandPrompt },
-          ],
-          temperature: 0.5,
-        }),
-      });
-
-      if (expandRes.ok) {
-        const expandParsed = await readJson<{
-          choices?: Array<{ message?: { content?: string } }>;
-        }>(expandRes);
-        if (expandParsed.ok) {
-          const expanded =
-            expandParsed.data.choices?.[0]?.message?.content?.trim() || "";
-          if (expanded) {
-            draftMarkdown = expanded;
-          }
-        } else {
-          console.warn("GLM 扩写返回非 JSON", {
-            status: expandRes.status,
-            snippet: expandParsed.text.slice(0, 120),
-          });
+      try {
+        const expanded = await requestCompletionWithFallback(
+          {
+            baseUrl,
+            apiKey,
+            model,
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: expandPrompt },
+            ],
+            temperature: 0.5,
+          },
+          fallbackModel
+        );
+        if (expanded.content) {
+          draftMarkdown = expanded.content.trim();
         }
+      } catch {
+        // Keep original draftMarkdown if expansion fails.
       }
     }
 
@@ -380,6 +413,7 @@ export async function POST(req: Request) {
         baseUrl,
         apiKey,
         model,
+        fallbackModel,
         systemPrompt,
         sourceTitle: title,
         topic: draftTopic,

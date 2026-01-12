@@ -237,23 +237,25 @@ function countPlainChars(value: string) {
   return value.replace(/\s+/g, "").length;
 }
 
-function hardSplitByLength(text: string, maxChars: number) {
-  const segments: string[] = [];
-  let buffer = "";
-  for (const char of text) {
-    buffer += char;
-    if (countPlainChars(buffer) >= maxChars) {
-      segments.push(buffer.trim());
-      buffer = "";
+function groupByMaxChars(segments: string[], maxChars: number) {
+  const grouped: string[] = [];
+  let current = "";
+  for (const segment of segments) {
+    const candidate = current ? `${current}${segment}` : segment;
+    if (current && countPlainChars(candidate) > maxChars) {
+      grouped.push(current.trim());
+      current = segment;
+    } else {
+      current = candidate;
     }
   }
-  if (buffer.trim()) segments.push(buffer.trim());
-  return segments;
+  if (current.trim()) grouped.push(current.trim());
+  return grouped;
 }
 
 function splitParagraphContent(content: string) {
   const normalized = content.replace(/\s+/g, " ").trim();
-  const maxChars = 48;
+  const maxChars = 72;
   if (countPlainChars(normalized) <= maxChars) return [normalized];
 
   const sentences = splitByDelimiters(normalized, [
@@ -266,34 +268,15 @@ function splitParagraphContent(content: string) {
     ";",
   ]);
 
-  const grouped: string[] = [];
-  let current = "";
-  for (const sentence of sentences) {
-    const candidate = current ? `${current}${sentence}` : sentence;
-    if (current && countPlainChars(candidate) > maxChars) {
-      grouped.push(current.trim());
-      current = sentence;
-    } else {
-      current = candidate;
-    }
-  }
-  if (current.trim()) grouped.push(current.trim());
-
+  const grouped = groupByMaxChars(sentences, maxChars);
   const finalSegments: string[] = [];
   for (const segment of grouped) {
-    if (countPlainChars(segment) <= maxChars * 1.2) {
+    if (countPlainChars(segment) <= maxChars * 1.6) {
       finalSegments.push(segment.trim());
       continue;
     }
     const commas = splitByDelimiters(segment, ["，", ","]);
-    for (const chunk of commas) {
-      if (!chunk.trim()) continue;
-      if (countPlainChars(chunk) > maxChars * 1.2) {
-        finalSegments.push(...hardSplitByLength(chunk.trim(), maxChars));
-      } else {
-        finalSegments.push(chunk.trim());
-      }
-    }
+    finalSegments.push(...groupByMaxChars(commas, maxChars));
   }
 
   return finalSegments.length > 0 ? finalSegments : [normalized];

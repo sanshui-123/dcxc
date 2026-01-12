@@ -164,6 +164,10 @@ function normalizeTextContent(text: string) {
     return PUNCTUATION_MAP[match] ?? match;
   });
   output = output.replace(/[ \t\u00a0]+/g, "");
+  output = output.replace(/^["']+|["']+$/g, "");
+  output = output.replace(/^[”’]+|[“‘]+$/g, "");
+  output = output.replace(/^[,.;:!?]+|[,.;:!?]+$/g, "");
+  output = output.replace(/^-{2,}$/g, "");
   return output;
 }
 

@@ -640,7 +640,7 @@ export default function CreatePage() {
     let attempts = 0;
     let lastTotalPage: number | undefined;
     try {
-      while (collected.length < limit && attempts < 5) {
+      while (collected.length < limit) {
         const res = await fetch("/api/hot-articles", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -674,6 +674,9 @@ export default function CreatePage() {
           typeof data.meta?.totalPage === "number" && data.meta.totalPage > 0
             ? data.meta.totalPage
             : lastTotalPage;
+        const maxAttempts = lastTotalPage
+          ? Math.min(lastTotalPage, 10)
+          : 6;
         const nextPage = lastTotalPage
           ? page >= lastTotalPage
             ? 1
@@ -681,10 +684,37 @@ export default function CreatePage() {
           : page + 1;
         page = nextPage;
         attempts += 1;
+        if (attempts >= maxAttempts) break;
       }
 
       if (collected.length === 0) {
-        setHotError("暂无新内容，可稍后再试。");
+        if (hotArticles.length > 0) {
+          setHotMessage("暂无新内容，继续显示上次的 5 篇。");
+          setActiveSource("hot");
+          return;
+        }
+        try {
+          const fallbackRes = await fetch(
+            "/api/hot-articles?category=17&limit=5"
+          );
+          const fallbackParsed = await readApiJson<HotArticlesApiResponse>(
+            fallbackRes,
+            "爆文接口"
+          );
+          if (fallbackParsed.ok && fallbackRes.ok && fallbackParsed.data.ok) {
+            const fallbackItems = fallbackParsed.data.data.map(toHotArticle);
+            if (fallbackItems.length > 0) {
+              setHotArticles(fallbackItems);
+              setHotMessage("暂无新内容，展示最近的 5 篇。");
+              setActiveSource("hot");
+              return;
+            }
+          }
+        } catch {
+          // ignore fallback errors
+        }
+        setHotMessage("暂无新内容，可稍后再试。");
+        setActiveSource("hot");
         return;
       }
 
